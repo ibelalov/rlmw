@@ -1,3 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local envs
+.venv/
+venv/
+env/
+
+# Runtime outputs
+data/
+runs/
+checkpoints/
+exports/
+cache/
+
+# Secrets
+.env
+*.key
+*.pem
+secrets.json
+
+# Large artifacts
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.npy
+*.pkl
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
