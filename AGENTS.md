@@ -31,3 +31,18 @@ For binary matrix A over F_2:
 - Check that local-minimum constraints are encoded as support-intersection inequalities.
 - Check that no secret values are committed.
 - Check that notebook cells remain runnable in order from a fresh Colab runtime.
+
+## Notebook validation command
+
+```bash
+RLMW_HEADLESS=1 \
+RLMW_SMOKE=1 \
+RLMW_PROJECT_ROOT=/tmp/rlmw \
+jupyter nbconvert \
+  --to notebook \
+  --execute rlmw.ipynb \
+  --output rlmw_executed.ipynb \
+  --output-dir /tmp/rlmw_nb \
+  --ExecutePreprocessor.kernel_name=python3 \
+  --ExecutePreprocessor.timeout=900
+```
