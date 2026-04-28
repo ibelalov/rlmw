@@ -1,0 +1,39 @@
+name: Notebook smoke test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  notebook-smoke:
+    runs-on: ubuntu-latest
+
+    env:
+      RLMW_HEADLESS: "1"
+      RLMW_SMOKE: "1"
+      RLMW_PROJECT_ROOT: "/tmp/rlmw"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy scipy pandas matplotlib tqdm jupyter nbconvert nbclient ipykernel ortools "python-sat[pblib,aiger]"
+          python -m ipykernel install --user --name python3
+
+      - name: Execute notebook
+        run: |
+          mkdir -p /tmp/rlmw_nb
+          jupyter nbconvert \
+            --to notebook \
+            --execute rlmw.ipynb \
+            --output rlmw_executed.ipynb \
+            --output-dir /tmp/rlmw_nb \
+            --ExecutePreprocessor.kernel_name=python3 \
+            --ExecutePreprocessor.timeout=900
