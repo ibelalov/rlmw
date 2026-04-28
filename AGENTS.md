@@ -13,6 +13,8 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 - Avoid storing large outputs, datasets, checkpoints, or run logs in the notebook.
 - Do not commit secrets, API keys, GitHub tokens, or Google Drive paths containing private information.
 - Keep algebraic checks exact. Neural and Q-learning components may propose actions, but returned codewords must be verified exactly.
+- One PR at a time.
+- Long-running cells must be guarded by SMOKE mode.
 
 ## Mathematical invariants
 
@@ -31,10 +33,14 @@ For binary matrix A over F_2:
 - Check that local-minimum constraints are encoded as support-intersection inequalities.
 - Check that no secret values are committed.
 - Check that notebook cells remain runnable in order from a fresh Colab runtime.
+- Do not use `--allow-errors` in notebook execution checks.
+- Do not commit `/tmp` outputs.
 
 ## Notebook validation command
 
 ```bash
+mkdir -p /tmp/rlmw_nb
+
 RLMW_HEADLESS=1 \
 RLMW_SMOKE=1 \
 RLMW_PROJECT_ROOT=/tmp/rlmw \
