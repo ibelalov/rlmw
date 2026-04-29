@@ -24,12 +24,28 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy scipy pandas matplotlib tqdm jupyter nbconvert nbclient ipykernel ortools "python-sat[pblib,aiger]"
+          python -m pip install \
+            numpy \
+            scipy \
+            pandas \
+            matplotlib \
+            tqdm \
+            nbformat \
+            jupyter \
+            nbconvert \
+            nbclient \
+            ipykernel \
+            ortools \
+            "python-sat[pblib,aiger]"
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m ipykernel install --user --name python3
 
       - name: Execute notebook
         run: |
           mkdir -p /tmp/rlmw_nb
+          RLMW_HEADLESS=1 \
+          RLMW_SMOKE=1 \
+          RLMW_PROJECT_ROOT=/tmp/rlmw \
           jupyter nbconvert \
             --to notebook \
             --execute rlmw.ipynb \
