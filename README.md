@@ -27,7 +27,7 @@ but `c_star` is **not** assumed to be minimum-weight.
 
 Current notebook sections are:
 
-- **00.** Setup, environment, paths, dependency bootstrap
+- **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
 - **02.** Planted span-instance generator
 - **03.** Direction bank
@@ -39,19 +39,35 @@ Current notebook sections are:
 - **09.** Cross-entropy sampler
 - **10.** Strategy-level Q-controller skeleton
 - **11.** Anytime hybrid solver wrapper
+- **12.** Small benchmark/evaluation harness
+- **13.** Baseline comparison and ablation table
+- **14.** Lightweight performance profiling harness
+- **15.** Packed-bit GF(2) prototype helpers
+- **16.** Packed batch-delta comparison harness
+- **17.** Fast packed-popcount delta prototype
+- **18.** Delta backend scaling study
+- **19.** Supervised neural-guidance data generator
+- **20.** Tiny offline-trained neural ablation
 
-## Correctness contract
+## Current empirical conclusions
 
-- All GF(2) algebra is exact NumPy `uint8`/binary logic.
-- Neural models may rank or propose.
-- Cross-entropy and Q-learning are heuristic.
-- A returned threshold solution is valid only after exact verification:
-  - `c != 0`
-  - `c == A u`
-  - `wt(c) <= W`
-- `valid_solution` means a verified threshold hit, not a certified optimum.
-- `best_found` is heuristic best-so-far only.
-- No optimality may be claimed without a separate exact exclusion certificate.
+- The exact symbolic core passes notebook self-tests.
+- Solver-assisted tiny planted cases can find verified threshold solutions.
+- Gradient-only baselines may remain `best_found` on tiny cases.
+- `DirectionBank.deltas` / vectorized `uint8` remains the default delta backend.
+- Packed-bit helpers are exact but prototype-only.
+- Packed-fast delta is still slower than vectorized `uint8` on smoke-scale tests.
+- Neural ranker/generator label generation and tiny supervised training work.
+- Neural macro-actions now execute in diagnostic ablations.
+- Tiny neural ablations do not yet establish that trained neural guidance improves search.
+- No optimality certification is implemented.
+
+## Result semantics
+
+- `valid_solution`: candidate with `c != 0`, `c = A u`, and `wt(c) <= W`, exactly verified.
+- `best_found`: heuristic best-so-far candidate/weight, not certified.
+- `no_solution_found`: no verified candidate meeting `wt(c) <= W` found within the configured budget.
+- `certified_optimum`: **not implemented**; may only be claimed after a separate exact lower-weight exclusion proof.
 
 ## Running tests
 
@@ -60,8 +76,6 @@ The final notebook cell is:
 ```text
 Run all notebook self-tests
 ```
-
-That cell calls `run_all_self_tests()`.
 
 Headless validation command:
 
@@ -83,36 +97,21 @@ jupyter nbconvert \
 - Do not use `--allow-errors`.
 - Do not commit `/tmp/rlmw_nb/rlmw_executed.ipynb`.
 
-## Colab workflow
+## Next milestone
 
-- Open the notebook from GitHub.
-- Use **Runtime → Disconnect and delete runtime** for fresh tests.
-- Run setup cells, then either run all cells or the final self-test cell.
-- OR-Tools may be bootstrapped in interactive Colab.
-- Torch is used only for neural modules; GPU is optional and not required for smoke tests.
-- Persistent data/runs/checkpoints belong in Google Drive, not GitHub.
+The next technical milestone is:
 
-## Next experiment milestone
+**Harder diagnostic benchmark cases for neural guidance.**
 
-The next post-documentation milestone is a **small benchmark/evaluation harness**, not more architecture.
+These smoke-scale diagnostics should aim to create tiny cases where:
 
-The milestone should measure:
+- the symbolic baseline does not immediately solve,
+- the solver is optionally disabled,
+- neural actions are actually attempted,
+- trained and untrained neural variants can be compared,
+- all returned candidates are exactly verified.
 
-- best weight found
-- whether `wt(c) <= W` was found
-- runtime
-- number of directions
-- number of descent steps
-- number of failed minima archived
-- solver calls and solver statuses
-- cross-entropy entropy
-- action trace from the hybrid wrapper
-
-Early benchmarks should use tiny planted instances only, for example:
-
-- `N in {24, 32, 48}`
-- `r in {10, 12, 16}`
-- `W in {3, 4, 5}`
+This milestone remains smoke-scale and is **not** a model-quality claim.
 
 ## Executable artifact
 

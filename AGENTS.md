@@ -18,9 +18,9 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–11 are currently scaffolded as:
+Notebook sections 00–20 are currently scaffolded as:
 
-- **00.** Setup, environment, paths, dependency bootstrap
+- **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
 - **02.** Planted span-instance generator
 - **03.** Direction bank
@@ -32,6 +32,15 @@ Notebook sections 00–11 are currently scaffolded as:
 - **09.** Cross-entropy sampler
 - **10.** Strategy-level Q-controller skeleton
 - **11.** Anytime hybrid solver wrapper
+- **12.** Small benchmark/evaluation harness
+- **13.** Baseline comparison and ablation table
+- **14.** Lightweight performance profiling harness
+- **15.** Packed-bit GF(2) prototype helpers
+- **16.** Packed batch-delta comparison harness
+- **17.** Fast packed-popcount delta prototype
+- **18.** Delta backend scaling study
+- **19.** Supervised neural-guidance data generator
+- **20.** Tiny offline-trained neural ablation
 
 ## Mathematical invariants
 
@@ -43,6 +52,19 @@ For binary matrix A over F_2:
 - Directional weight change is:
   Δ_d(c) = wt(d) - 2 |supp(c) ∩ supp(d)|.
 
+## Current empirical conclusions
+
+- The exact symbolic core passes notebook self-tests.
+- Solver-assisted tiny planted cases can find verified threshold solutions.
+- Gradient-only baselines may remain `best_found` on tiny cases.
+- `DirectionBank.deltas` / vectorized `uint8` remains the default delta backend.
+- Packed-bit helpers are exact but prototype-only.
+- Packed-fast delta is still slower than vectorized `uint8` on smoke-scale tests.
+- Neural ranker/generator label generation and tiny supervised training work.
+- Neural macro-actions now execute in diagnostic ablations.
+- Tiny neural ablations are diagnostic only and do not establish model-quality gains.
+- No certified optimum mode exists.
+
 ## Result semantics
 
 - `valid_solution`: a candidate that has been exactly verified to satisfy `c != 0`, `c ∈ colspan(A)` (equivalently `c == A u` for some `u` over F_2), and `wt(c) <= W`.
@@ -52,11 +74,11 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Documentation and experiment-plan cleanup. *(this PR)*
-2. Small benchmark/evaluation harness.
-3. Baseline comparison and ablation table.
-4. Performance cleanup for bit-packed GF(2) operations.
-5. Only then consider longer training experiments.
+1. Documentation/status cleanup. *(this PR)*
+2. Harder neural-diagnostic benchmark cases.
+3. Small offline-trained neural comparison on those cases.
+4. Optional solver-certification/exclusion phase design.
+5. Larger performance work only after measurement justifies it.
 
 ## Review guidelines
 
@@ -68,12 +90,15 @@ For binary matrix A over F_2:
 - Do not use `--allow-errors` in notebook execution checks.
 - Do not commit `/tmp` outputs.
 
-## Review guidance for future benchmark PRs
+## Review guidance for future neural benchmark PRs
 
-- Benchmarks must be small in SMOKE mode.
-- No long training in default notebook execution.
-- Benchmark results must be labeled heuristic unless certified.
-- Returned candidates must be exactly verified.
+- Keep benchmarks small in SMOKE mode.
+- Ensure trained vs untrained variants are separated.
+- Ensure neural actions are actually attempted.
+- Do not count fallback actions as neural successes.
+- Do not make model-quality claims from smoke tests.
+- Ensure every returned candidate is exactly verified.
+- Do not confuse solver-assisted results with neural gains.
 - Do not commit generated benchmark artifacts, plots, or checkpoints unless explicitly requested.
 
 ## Notebook validation command
