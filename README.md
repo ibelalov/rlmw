@@ -49,6 +49,7 @@ Current notebook sections are:
 - **19.** Supervised neural-guidance data generator
 - **20.** Tiny offline-trained neural ablation
 - **21.** Harder neural-diagnostic benchmark cases
+- **22.** Calibrated neural diagnostic evaluation
 
 ## Current empirical conclusions
 
@@ -61,9 +62,11 @@ Current notebook sections are:
 - Neural ranker/generator label generation and tiny supervised training work.
 - Neural macro-actions now execute in diagnostic ablations.
 - Section 21 harder neural diagnostics are implemented.
-- Section 21 tracks neural action attempts, successes, no-ops, fallbacks, and model-compatibility failures.
-- Section 21 disables or masks solver action where needed so solver-assisted results are not confused with neural gains.
-- Neural plumbing and action execution are verified; search-quality gains are not established by smoke-scale diagnostics.
+- Section 22 calibrated neural diagnostic evaluation is implemented.
+- It separates solver-disabled diagnostic rows from solver-assisted reference rows.
+- It reports action-attempt/success/no-op/fallback diagnostics.
+- It still does not establish trained-neural search-quality gains.
+- All returned candidates must be exactly verified.
 - No optimality certification is implemented.
 
 ## Result semantics
@@ -105,17 +108,16 @@ jupyter nbconvert \
 
 The next technical milestone is:
 
-**Calibrated neural diagnostic evaluation.**
+**Controlled neural diagnostic analysis.**
 
 This milestone should:
 
-- run a small deterministic table over Section 21 harder diagnostic cases,
-- compare symbolic baseline, untrained neural variants, and trained neural variants,
-- report exact action-attempt/success/no-op/fallback diagnostics,
-- optionally repeat over a few seeds, still smoke-scale,
-- keep solver-disabled and solver-assisted results clearly separated,
-- exactly verify every returned candidate,
-- avoid model-quality claims unless backed by larger controlled experiments.
+- inspect Section 22 tables over a few deterministic smoke cases,
+- compare symbolic, untrained neural, and trained neural variants,
+- keep solver-disabled and solver-assisted rows separated,
+- identify whether trained neural differs from untrained neural in action success/no-op patterns,
+- avoid model-quality claims,
+- exactly verify every returned candidate.
 
 ## Executable artifact
 

@@ -18,7 +18,7 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–21 are currently scaffolded as:
+Notebook sections 00–22 are currently scaffolded as:
 
 - **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
@@ -42,6 +42,7 @@ Notebook sections 00–21 are currently scaffolded as:
 - **19.** Supervised neural-guidance data generator
 - **20.** Tiny offline-trained neural ablation
 - **21.** Harder neural-diagnostic benchmark cases
+- **22.** Calibrated neural diagnostic evaluation
 
 ## Mathematical invariants
 
@@ -64,8 +65,9 @@ For binary matrix A over F_2:
 - Neural ranker/generator label generation and tiny supervised training work.
 - Neural macro-actions now execute in diagnostic ablations.
 - Section 21 harder neural diagnostics are implemented.
-- Section 21 tracks neural action attempts, successes, no-ops, fallbacks, and model-compatibility failures.
-- Section 21 disables or masks solver action where needed so solver-assisted results are not confused with neural gains.
+- Section 22 calibrated neural diagnostic evaluation is implemented.
+- Solver-disabled diagnostic rows and solver-assisted reference rows are separated.
+- Action attempts/successes/no-ops/fallback diagnostics are reported.
 - Neural smoke diagnostics verify plumbing/action execution but do not establish trained-neural search superiority.
 - No certified optimum mode exists.
 
@@ -78,9 +80,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Documentation/status sync after Section 21. *(this PR)*
-2. Calibrated neural diagnostic evaluation.
-3. Small deterministic table comparing symbolic, untrained neural, and trained neural variants on Section 21 cases.
+1. Post-Section-22 notebook/docs hygiene. *(this PR)*
+2. Controlled neural diagnostic analysis.
+3. Small deterministic table review over Section 22 cases.
 4. Optional solver-certification/exclusion phase design.
 5. Larger performance work only after measurement justifies it.
 
@@ -93,6 +95,10 @@ For binary matrix A over F_2:
 - Check that notebook cells remain runnable in order from a fresh Colab runtime.
 - Do not use `--allow-errors` in notebook execution checks.
 - Do not commit `/tmp` outputs.
+- Notebook outputs should generally be cleared before committing.
+- Do not commit executed notebooks from `/tmp`.
+- Do not confuse solver-assisted reference rows with neural gains.
+- Do not claim trained-neural superiority from smoke diagnostics.
 
 ## Review guidance for future neural benchmark PRs
 
