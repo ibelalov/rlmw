@@ -18,7 +18,7 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–20 are currently scaffolded as:
+Notebook sections 00–21 are currently scaffolded as:
 
 - **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
@@ -41,6 +41,7 @@ Notebook sections 00–20 are currently scaffolded as:
 - **18.** Delta backend scaling study
 - **19.** Supervised neural-guidance data generator
 - **20.** Tiny offline-trained neural ablation
+- **21.** Harder neural-diagnostic benchmark cases
 
 ## Mathematical invariants
 
@@ -56,13 +57,16 @@ For binary matrix A over F_2:
 
 - The exact symbolic core passes notebook self-tests.
 - Solver-assisted tiny planted cases can find verified threshold solutions.
-- Gradient-only baselines may remain `best_found` on tiny cases.
+- Gradient-only or symbolic baselines may remain `best_found` on tiny or harder diagnostic cases.
 - `DirectionBank.deltas` / vectorized `uint8` remains the default delta backend.
 - Packed-bit helpers are exact but prototype-only.
-- Packed-fast delta is still slower than vectorized `uint8` on smoke-scale tests.
+- Packed-fast delta remains slower than vectorized `uint8` on smoke-scale tests.
 - Neural ranker/generator label generation and tiny supervised training work.
 - Neural macro-actions now execute in diagnostic ablations.
-- Tiny neural ablations are diagnostic only and do not establish model-quality gains.
+- Section 21 harder neural diagnostics are implemented.
+- Section 21 tracks neural action attempts, successes, no-ops, fallbacks, and model-compatibility failures.
+- Section 21 disables or masks solver action where needed so solver-assisted results are not confused with neural gains.
+- Neural smoke diagnostics verify plumbing/action execution but do not establish trained-neural search superiority.
 - No certified optimum mode exists.
 
 ## Result semantics
@@ -74,9 +78,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Documentation/status cleanup. *(this PR)*
-2. Harder neural-diagnostic benchmark cases.
-3. Small offline-trained neural comparison on those cases.
+1. Documentation/status sync after Section 21. *(this PR)*
+2. Calibrated neural diagnostic evaluation.
+3. Small deterministic table comparing symbolic, untrained neural, and trained neural variants on Section 21 cases.
 4. Optional solver-certification/exclusion phase design.
 5. Larger performance work only after measurement justifies it.
 
@@ -93,13 +97,15 @@ For binary matrix A over F_2:
 ## Review guidance for future neural benchmark PRs
 
 - Keep benchmarks small in SMOKE mode.
+- Ensure no Python `hash(...)` is used for deterministic experiment seeds.
+- Ensure solver-disabled diagnostics really mask solver action.
 - Ensure trained vs untrained variants are separated.
-- Ensure neural actions are actually attempted.
+- Ensure neural variants actually attempt relevant neural actions.
 - Do not count fallback actions as neural successes.
 - Do not make model-quality claims from smoke tests.
 - Ensure every returned candidate is exactly verified.
 - Do not confuse solver-assisted results with neural gains.
-- Do not commit generated benchmark artifacts, plots, or checkpoints unless explicitly requested.
+- Do not commit generated benchmark artifacts, plots, datasets, or checkpoints unless explicitly requested.
 
 ## Notebook validation command
 
