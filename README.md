@@ -48,25 +48,29 @@ Current notebook sections are:
 - **18.** Delta backend scaling study
 - **19.** Supervised neural-guidance data generator
 - **20.** Tiny offline-trained neural ablation
+- **21.** Harder neural-diagnostic benchmark cases
 
 ## Current empirical conclusions
 
 - The exact symbolic core passes notebook self-tests.
 - Solver-assisted tiny planted cases can find verified threshold solutions.
-- Gradient-only baselines may remain `best_found` on tiny cases.
+- Gradient-only or symbolic baselines may remain `best_found` on tiny or harder diagnostic cases.
 - `DirectionBank.deltas` / vectorized `uint8` remains the default delta backend.
 - Packed-bit helpers are exact but prototype-only.
-- Packed-fast delta is still slower than vectorized `uint8` on smoke-scale tests.
+- Packed-fast delta remains slower than vectorized `uint8` on smoke-scale tests.
 - Neural ranker/generator label generation and tiny supervised training work.
 - Neural macro-actions now execute in diagnostic ablations.
-- Tiny neural ablations do not yet establish that trained neural guidance improves search.
+- Section 21 harder neural diagnostics are implemented.
+- Section 21 tracks neural action attempts, successes, no-ops, fallbacks, and model-compatibility failures.
+- Section 21 disables or masks solver action where needed so solver-assisted results are not confused with neural gains.
+- Neural plumbing and action execution are verified; search-quality gains are not established by smoke-scale diagnostics.
 - No optimality certification is implemented.
 
 ## Result semantics
 
 - `valid_solution`: candidate with `c != 0`, `c = A u`, and `wt(c) <= W`, exactly verified.
 - `best_found`: heuristic best-so-far candidate/weight, not certified.
-- `no_solution_found`: no verified candidate meeting `wt(c) <= W` found within the configured budget.
+- `no_solution_found`: no verified threshold hit found within the configured budget.
 - `certified_optimum`: **not implemented**; may only be claimed after a separate exact lower-weight exclusion proof.
 
 ## Running tests
@@ -101,17 +105,17 @@ jupyter nbconvert \
 
 The next technical milestone is:
 
-**Harder diagnostic benchmark cases for neural guidance.**
+**Calibrated neural diagnostic evaluation.**
 
-These smoke-scale diagnostics should aim to create tiny cases where:
+This milestone should:
 
-- the symbolic baseline does not immediately solve,
-- the solver is optionally disabled,
-- neural actions are actually attempted,
-- trained and untrained neural variants can be compared,
-- all returned candidates are exactly verified.
-
-This milestone remains smoke-scale and is **not** a model-quality claim.
+- run a small deterministic table over Section 21 harder diagnostic cases,
+- compare symbolic baseline, untrained neural variants, and trained neural variants,
+- report exact action-attempt/success/no-op/fallback diagnostics,
+- optionally repeat over a few seeds, still smoke-scale,
+- keep solver-disabled and solver-assisted results clearly separated,
+- exactly verify every returned candidate,
+- avoid model-quality claims unless backed by larger controlled experiments.
 
 ## Executable artifact
 
