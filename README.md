@@ -129,7 +129,7 @@ Core logic should remain in this notebook unless explicitly requested otherwise.
 
 ## Storage policy
 
-Google Drive is used for runtime persistence (for example: data, runs, checkpoints, exports, cache). These runtime artifacts should not be stored in GitHub.
+Google Drive and `PROJECT_ROOT` are used only for runtime artifact persistence (for example: data, runs, checkpoints, exports, cache). They are not source identity. Evidence manifests record an explicit source root/notebook identity separately from artifact storage: CI uses the checked-out GitHub workspace and records the real git HEAD plus the SHA-256 of that checkout's `rlmw.ipynb`; Colab records the configured GitHub source URL/ref and marks checkout-only fields unavailable when no checkout is accessible. Ordinary Run all does not create an evidence ZIP; export is opt-in and writes to `EXPORT_DIR` only when explicitly requested.
 
 ## Development workflow
 

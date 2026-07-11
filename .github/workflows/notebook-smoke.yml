@@ -13,6 +13,7 @@ jobs:
       RLMW_HEADLESS: "1"
       RLMW_SMOKE: "1"
       RLMW_PROJECT_ROOT: "/tmp/rlmw"
+      RLMW_SOURCE_ROOT: "${{ github.workspace }}"
 
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +61,7 @@ jobs:
           RLMW_HEADLESS=1 \
           RLMW_SMOKE=1 \
           RLMW_PROJECT_ROOT=/tmp/rlmw \
+          RLMW_SOURCE_ROOT="$GITHUB_WORKSPACE" \
           RLMW_EXPORT_EVIDENCE=1 \
           RLMW_REPETITIONS=2 \
           RLMW_SEED=12345 \
@@ -71,7 +73,7 @@ jobs:
             --ExecutePreprocessor.kernel_name=python3 \
             --ExecutePreprocessor.timeout=900
           python - <<'PY'
-          import csv, glob, hashlib, json, zipfile
+          import csv, glob, hashlib, json, subprocess, zipfile
           bundles = glob.glob('/tmp/rlmw_evidence/*.zip')
           assert len(bundles) == 1, bundles
           zpath = bundles[0]
@@ -82,6 +84,14 @@ jobs:
               hashes = json.loads(z.read('member_hashes.json'))
               for name, digest in hashes.items():
                   assert hashlib.sha256(z.read(name)).hexdigest() == digest, name
+              manifest = json.loads(z.read('manifest.json'))
+              source = manifest['source']
+              assert source['is_git_checkout'] is True, source
+              assert source['git_sha'] == subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), source
+              with open('rlmw.ipynb', 'rb') as f:
+                  assert source['notebook_sha256'] == hashlib.sha256(f.read()).hexdigest(), source
+              assert 'unknown_sour' not in zpath, zpath
+              assert manifest['artifact_storage']['output_dir'] == '/tmp/rlmw_evidence', manifest['artifact_storage']
               witnesses = json.loads(z.read('witnesses.json'))['witnesses']
               for w in witnesses:
                   A, u, c, W = w['A'], w['u'], w['c'], int(w['W'])
