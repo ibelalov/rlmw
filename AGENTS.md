@@ -82,11 +82,10 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Fix nonzero-domain solver correctness and result accounting. *(this PR)*
-2. Add the parity-check-matrix interface and an exact small-instance oracle.
-3. Controlled neural diagnostic analysis.
-4. Small deterministic table review over Section 22 cases.
-5. Larger performance work only after measurement justifies it.
+1. Add the parity-check-matrix interface and an exact small-instance oracle.
+2. Controlled neural diagnostic analysis.
+3. Small deterministic table review over Section 22 cases.
+4. Larger performance work only after measurement justifies it.
 
 ## Review guidelines
 
@@ -98,6 +97,7 @@ For binary matrix A over F_2:
 - Do not use `--allow-errors` in notebook execution checks.
 - Do not commit `/tmp` outputs.
 - Notebook outputs should generally be cleared before committing.
+- PROJECT_ROOT and Google Drive `rlmw` directories are artifact storage only; source identity must come from an explicit source root/URL/ref, not from artifact storage.
 - Do not commit executed notebooks from `/tmp`.
 - Do not confuse solver-assisted reference rows with neural gains.
 - Do not claim trained-neural superiority from smoke diagnostics.
