@@ -20,3 +20,6 @@ secrets.json
 *.npz
 *.npy
 *.pkl
+
+# RLMW evidence bundles
+rlmw_colab_evidence_*.zip
