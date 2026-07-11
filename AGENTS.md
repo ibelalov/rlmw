@@ -53,6 +53,7 @@ For binary matrix A over F_2:
 - A returned solution must satisfy c ≠ 0 and wt(c) ≤ W.
 - Directional weight change is:
   Δ_d(c) = wt(d) - 2 |supp(c) ∩ supp(d)|.
+- A valid descending move additionally requires c XOR d ≠ 0; the forbidden zero-codeword move must not be used as an improvement.
 
 ## Current empirical conclusions
 
@@ -73,17 +74,18 @@ For binary matrix A over F_2:
 
 ## Result semantics
 
-- `valid_solution`: a candidate that has been exactly verified to satisfy `c != 0`, `c ∈ colspan(A)` (equivalently `c == A u` for some `u` over F_2), and `wt(c) <= W`.
-- `best_found`: heuristic best-so-far candidate/weight observed during search; not a certificate of optimality.
+- `valid_solution`: a candidate that has been exactly verified to satisfy `c != 0`, `c ∈ colspan(A)` (equivalently `c == A u` for some `u` over F_2), and `wt(c) <= W`; this is not an optimality certificate.
+- `best_found`: exactly verified nonzero heuristic best-so-far candidate/weight observed during search; not a certificate of optimality.
 - `no_solution_found`: no verified threshold hit (`wt(c) <= W`) was found within the configured budget.
 - `certified_optimum`: **not currently implemented**; may only be claimed after a separate exact lower-weight exclusion proof.
+- Solver use is explicit via `HybridSolverConfig.use_local_solver`; model-use flags require corresponding supplied models.
 
 ## Next milestone order
 
-1. Post-Section-22 notebook/docs hygiene. *(this PR)*
-2. Controlled neural diagnostic analysis.
-3. Small deterministic table review over Section 22 cases.
-4. Optional solver-certification/exclusion phase design.
+1. Fix nonzero-domain solver correctness and result accounting. *(this PR)*
+2. Add the parity-check-matrix interface and an exact small-instance oracle.
+3. Controlled neural diagnostic analysis.
+4. Small deterministic table review over Section 22 cases.
 5. Larger performance work only after measurement justifies it.
 
 ## Review guidelines
