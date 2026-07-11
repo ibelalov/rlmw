@@ -50,6 +50,8 @@ Current notebook sections are:
 - **20.** Tiny offline-trained neural ablation
 - **21.** Harder neural-diagnostic benchmark cases
 - **22.** Calibrated neural diagnostic evaluation
+- **23.** Optional Colab evidence exporter
+- **24.** H-native binary-code interface and exact small-instance oracle
 
 ## Current empirical conclusions
 
@@ -63,6 +65,9 @@ Current notebook sections are:
 - Neural macro-actions now execute in diagnostic ablations.
 - Section 21 harder neural diagnostics are implemented.
 - Section 22 calibrated neural diagnostic evaluation is implemented.
+- Section 24 H-native parity-check interface derives an exact `A` basis with `H A = 0` over `F_2`, preserving the original coordinate order of `H`.
+- Section 24 exact tiny oracle exhaustively enumerates all nonzero kernel coefficients in Gray-code order under a conservative dimension cap; it is for small CI/Colab checks, not cryptographic or large coding-theory scale claims.
+- Section 24 distinguishes `CERTIFIED_OPTIMUM`, `CERTIFIED_TRIVIAL_CODE`, `VERIFIED_THRESHOLD_WITNESS`, `CERTIFIED_NO_THRESHOLD_WITNESS`, `RESOURCE_LIMIT`, and `INCONCLUSIVE`; a threshold witness proves only `d <= W`, not optimality.
 - It separates solver-disabled diagnostic rows from solver-assisted reference rows.
 - It reports action-attempt/success/no-op/fallback diagnostics.
 - It still does not establish trained-neural search-quality gains.
@@ -106,18 +111,17 @@ jupyter nbconvert \
 - Do not use `--allow-errors`.
 - Do not commit `/tmp/rlmw_nb/rlmw_executed.ipynb`.
 
+## H-native interface and tiny exact oracle
+
+Section 24 introduces the public parity-check representation `HCodeProblem` for codes `C = {c in F_2^n : Hc = 0}`. It derives the existing solver-compatible `A` convention as an `n`-by-`k` full-column-rank kernel basis satisfying `H A = 0`, where `k = n - rank(H)`. Rows of `A` retain the original coordinate order of columns of `H`; redundant parity-check rows and invertible row operations on `H` do not change the represented code.
+
+The certified exact oracle is deliberately scoped to tiny instances. It enumerates all `2^k - 1` nonzero coefficient vectors in Gray-code order, updates `c = A u` incrementally, and reports `CERTIFIED_OPTIMUM` only after exhaustive coverage gives equal lower and upper bounds. If `k` exceeds the configured cap, it returns `RESOURCE_LIMIT` without an exact-distance claim. A direct coordinate-space `Hc = 0` enumerator is included only for very small differential tests.
+
+Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOLD_WITNESS` proves only that some nonzero codeword has weight at most `W`; `CERTIFIED_NO_THRESHOLD_WITNESS` requires complete exact coverage or another explicit exact proof. CP-SAT feasibility statuses are therefore treated as threshold evidence only and are never labelled as minimum-distance certificates.
+
 ## Next milestone
 
-The next technical milestone is:
-
-**Add a parity-check-matrix interface and an exact small-instance oracle.**
-
-This milestone should:
-
-- add an `H`-native interface without weakening current `A`-span exactness checks,
-- provide a small exact oracle for deterministic validation,
-- keep heuristic search results separate from any exact oracle/certification metadata,
-- continue to avoid optimality claims unless backed by an explicit exact proof.
+The next technical milestone is controlled neural diagnostic analysis after review of the H-native parity-check interface and certified tiny exact oracle.
 
 ## Executable artifact
 
