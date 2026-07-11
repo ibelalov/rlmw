@@ -17,11 +17,11 @@ with
 \mathrm{wt}(c) \le W.
 \]
 
-During training, the threshold `W` is derived from a planted vector
+For planted training cases, the threshold `W` is derived from a planted vector
 \[
 c_\star = A u_\star,
 \]
-but `c_star` is **not** assumed to be minimum-weight.
+but `c_star` is **not** assumed to be minimum-weight. For public H-native codes, `W` is optional public problem data and is not necessarily a planted weight.
 
 ## Notebook scaffold
 
@@ -72,14 +72,14 @@ Current notebook sections are:
 - It reports action-attempt/success/no-op/fallback diagnostics.
 - It still does not establish trained-neural search-quality gains.
 - All returned candidates must be exactly verified.
-- No optimality certification is implemented.
+- Exact optimality certification exists only for the capped exhaustive Section 24 oracle; heuristic and CP-SAT threshold results are not optimum certificates.
 
 ## Result semantics
 
 - `valid_solution`: candidate with `c != 0`, `c = A u`, and `wt(c) <= W`, exactly verified; it is not an optimality certificate.
 - `best_found`: exactly verified nonzero heuristic incumbent above the threshold, not certified optimal.
 - `no_solution_found`: no verified threshold hit found within the configured budget.
-- `certified_optimum`: **not implemented**; may only be claimed after a separate exact lower-weight exclusion proof.
+- `certified_optimum`: implemented only by the capped exhaustive Section 24 oracle after complete enumeration with matching finite bounds and a verified nonzero witness; heuristic and CP-SAT threshold results must not claim it.
 
 The local-minimum solver and controller operate on the nonzero codeword domain: a direction `d` is a valid descending move from `c` only when `c XOR d` is nonzero and lowers weight. Solver use is controlled explicitly by `HybridSolverConfig.use_local_solver`; solver-disabled diagnostics must not depend on whether OR-Tools happens to be installed. Neural model flags similarly require supplied models and are not silently ignored. Benchmark metadata separates exact candidate verification from heuristic search and keeps `optimality_certified = false`.
 
@@ -121,7 +121,7 @@ Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOL
 
 ## Next milestone
 
-The next technical milestone is controlled neural diagnostic analysis after review of the H-native parity-check interface and certified tiny exact oracle.
+The next technical milestone is a frozen H-native benchmark protocol with strong classical baselines before making any neural-quality claims.
 
 ## Executable artifact
 
@@ -133,7 +133,7 @@ Core logic should remain in this notebook unless explicitly requested otherwise.
 
 ## Storage policy
 
-Google Drive and `PROJECT_ROOT` are used only for runtime artifact persistence (for example: data, runs, checkpoints, exports, cache). They are not source identity. Evidence manifests record an explicit source root/notebook identity separately from artifact storage: CI uses the checked-out GitHub workspace and records the real git HEAD plus the SHA-256 of that checkout's `rlmw.ipynb`; Colab records the configured GitHub source URL/ref and marks checkout-only fields unavailable when no checkout is accessible. Ordinary Run all does not create an evidence ZIP; export is opt-in and writes to `EXPORT_DIR` only when explicitly requested.
+Google Drive and `PROJECT_ROOT` are used only for runtime artifact persistence (for example: data, runs, checkpoints, exports, cache). They are not source identity. Evidence manifests record an explicit source root/notebook identity separately from artifact storage: CI uses the checked-out GitHub workspace and records the real git HEAD plus the SHA-256 of that checkout's `rlmw.ipynb`; Colab records the configured GitHub source URL/ref and marks checkout-only fields unavailable when no checkout is accessible. Ordinary Run all does not create an evidence ZIP; export is opt-in and writes to `EXPORT_DIR` only when explicitly requested. The exporter records source provenance when explicit checkout/source metadata is available, but it does not expand provenance beyond the existing configured source-root/URL/ref fields.
 
 ## Development workflow
 
