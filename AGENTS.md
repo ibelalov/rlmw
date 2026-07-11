@@ -18,7 +18,7 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–22 are currently scaffolded as:
+Notebook sections 00–24 are currently scaffolded as:
 
 - **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
@@ -75,21 +75,21 @@ For binary matrix A over F_2:
 - Solver-disabled diagnostic rows and solver-assisted reference rows are separated.
 - Action attempts/successes/no-ops/fallback diagnostics are reported.
 - Neural smoke diagnostics verify plumbing/action execution but do not establish trained-neural search superiority.
-- No certified optimum mode exists.
+- Certified optimum mode exists only inside the capped exhaustive Section 24 oracle; the hybrid solver, CP-SAT threshold checks, and neural diagnostics remain non-optimality-certifying.
 
 ## Result semantics
 
 - `valid_solution`: a candidate that has been exactly verified to satisfy `c != 0`, `c ∈ colspan(A)` (equivalently `c == A u` for some `u` over F_2), and `wt(c) <= W`; this is not an optimality certificate.
 - `best_found`: exactly verified nonzero heuristic best-so-far candidate/weight observed during search; not a certificate of optimality.
 - `no_solution_found`: no verified threshold hit (`wt(c) <= W`) was found within the configured budget.
-- `certified_optimum`: **not currently implemented**; may only be claimed after a separate exact lower-weight exclusion proof.
+- `certified_optimum`: implemented only by the capped exhaustive Section 24 oracle after complete enumeration with matching finite bounds and a verified nonzero witness; heuristic and CP-SAT threshold results must not claim it.
 - Solver use is explicit via `HybridSolverConfig.use_local_solver`; model-use flags require corresponding supplied models.
 
 ## Next milestone order
 
-1. Review the H-native parity-check interface and certified tiny exact oracle.
-2. Controlled neural diagnostic analysis.
-3. Small deterministic table review over Section 22 cases.
+1. Freeze an H-native benchmark protocol.
+2. Add strong classical baselines for public-H comparisons.
+3. Only then revisit controlled neural-quality claims.
 4. Larger performance work only after measurement justifies it.
 
 ## Review guidelines
