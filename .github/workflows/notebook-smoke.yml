@@ -53,3 +53,60 @@ jobs:
             --output-dir /tmp/rlmw_nb \
             --ExecutePreprocessor.kernel_name=python3 \
             --ExecutePreprocessor.timeout=900
+
+      - name: Export and validate evidence bundle
+        run: |
+          mkdir -p /tmp/rlmw_nb /tmp/rlmw_evidence
+          RLMW_HEADLESS=1 \
+          RLMW_SMOKE=1 \
+          RLMW_PROJECT_ROOT=/tmp/rlmw \
+          RLMW_EXPORT_EVIDENCE=1 \
+          RLMW_REPETITIONS=2 \
+          RLMW_SEED=12345 \
+          jupyter nbconvert \
+            --to notebook \
+            --execute rlmw.ipynb \
+            --output rlmw_evidence_executed.ipynb \
+            --output-dir /tmp/rlmw_nb \
+            --ExecutePreprocessor.kernel_name=python3 \
+            --ExecutePreprocessor.timeout=900
+          python - <<'PY'
+          import csv, glob, hashlib, json, zipfile
+          bundles = glob.glob('/tmp/rlmw_evidence/*.zip')
+          assert len(bundles) == 1, bundles
+          zpath = bundles[0]
+          with zipfile.ZipFile(zpath) as z:
+              names = set(z.namelist())
+              required = {'manifest.json','correctness.json','benchmarks.csv','traces.jsonl','witnesses.json','member_hashes.json','summary.md'}
+              assert required <= names, names
+              hashes = json.loads(z.read('member_hashes.json'))
+              for name, digest in hashes.items():
+                  assert hashlib.sha256(z.read(name)).hexdigest() == digest, name
+              witnesses = json.loads(z.read('witnesses.json'))['witnesses']
+              for w in witnesses:
+                  A, u, c, W = w['A'], w['u'], w['c'], int(w['W'])
+                  replay = [sum((int(A[i][j]) & int(u[j])) for j in range(len(u))) % 2 for i in range(len(A))]
+                  assert replay == c, w['id']
+                  assert sum(c) > 0, w['id']
+                  if w['threshold_verified']:
+                      assert sum(c) <= W, w['id']
+              traces = [json.loads(line) for line in z.read('traces.jsonl').decode().splitlines() if line.strip()]
+              recognized = {'OPTIMAL','FEASIBLE','INFEASIBLE','UNKNOWN','MODEL_INVALID','NOT_INVOKED','UNAVAILABLE_DEPENDENCY'}
+              solver_refs = [t for t in traces if t['variant'] == 'solver_reference']
+              assert solver_refs
+              for tr in solver_refs:
+                  prov = tr['provenance']
+                  assert prov.get('initial_threshold_hit') or (tr['trace'] and tr['trace'][0]['action'] == 4), tr
+                  assert prov.get('solver_status') in recognized, prov
+              rows = list(csv.DictReader(z.read('benchmarks.csv').decode().splitlines()))
+              seeds = {r['run_seed'] for r in rows}
+              assert len(seeds) >= 2, seeds
+          print(zpath)
+          PY
+
+      - name: Upload evidence bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: rlmw-colab-evidence
+          path: /tmp/rlmw_evidence/*.zip
+          if-no-files-found: error
