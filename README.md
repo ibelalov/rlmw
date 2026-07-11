@@ -71,10 +71,12 @@ Current notebook sections are:
 
 ## Result semantics
 
-- `valid_solution`: candidate with `c != 0`, `c = A u`, and `wt(c) <= W`, exactly verified.
-- `best_found`: heuristic best-so-far candidate/weight, not certified.
+- `valid_solution`: candidate with `c != 0`, `c = A u`, and `wt(c) <= W`, exactly verified; it is not an optimality certificate.
+- `best_found`: exactly verified nonzero heuristic incumbent above the threshold, not certified optimal.
 - `no_solution_found`: no verified threshold hit found within the configured budget.
 - `certified_optimum`: **not implemented**; may only be claimed after a separate exact lower-weight exclusion proof.
+
+The local-minimum solver and controller operate on the nonzero codeword domain: a direction `d` is a valid descending move from `c` only when `c XOR d` is nonzero and lowers weight. Solver use is controlled explicitly by `HybridSolverConfig.use_local_solver`; solver-disabled diagnostics must not depend on whether OR-Tools happens to be installed. Neural model flags similarly require supplied models and are not silently ignored. Benchmark metadata separates exact candidate verification from heuristic search and keeps `optimality_certified = false`.
 
 ## Running tests
 
@@ -108,16 +110,14 @@ jupyter nbconvert \
 
 The next technical milestone is:
 
-**Controlled neural diagnostic analysis.**
+**Add a parity-check-matrix interface and an exact small-instance oracle.**
 
 This milestone should:
 
-- inspect Section 22 tables over a few deterministic smoke cases,
-- compare symbolic, untrained neural, and trained neural variants,
-- keep solver-disabled and solver-assisted rows separated,
-- identify whether trained neural differs from untrained neural in action success/no-op patterns,
-- avoid model-quality claims,
-- exactly verify every returned candidate.
+- add an `H`-native interface without weakening current `A`-span exactness checks,
+- provide a small exact oracle for deterministic validation,
+- keep heuristic search results separate from any exact oracle/certification metadata,
+- continue to avoid optimality claims unless backed by an explicit exact proof.
 
 ## Executable artifact
 
