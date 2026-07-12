@@ -52,6 +52,7 @@ Current notebook sections are:
 - **22.** Calibrated neural diagnostic evaluation
 - **23.** Optional Colab evidence exporter
 - **24.** H-native binary-code interface and exact small-instance oracle
+- **25.** Frozen H-native benchmark protocol v1
 
 ## Current empirical conclusions
 
@@ -68,6 +69,7 @@ Current notebook sections are:
 - Section 24 H-native parity-check interface derives an exact `A` basis with `H A = 0` over `F_2`, preserving the original coordinate order of `H`.
 - Section 24 exact tiny oracle exhaustively enumerates all nonzero kernel coefficients in Gray-code order under a conservative dimension cap; it is for small CI/Colab checks, not cryptographic or large coding-theory scale claims.
 - Section 24 distinguishes `CERTIFIED_OPTIMUM`, `CERTIFIED_TRIVIAL_CODE`, `VERIFIED_THRESHOLD_WITNESS`, `CERTIFIED_NO_THRESHOLD_WITNESS`, `RESOURCE_LIMIT`, and `INCONCLUSIVE`; a threshold witness proves only `d <= W`, not optimality.
+- Section 25 freezes public-H benchmark protocol `h-native-v1` with canonical H matrices, SHA-256 manifest digest `53a810e0a10031d95112cd42128203de6e5406e7c330fade882f4276968dd584`, train/validation/test group-disjoint splits, smoke/full budget profiles, no-leakage solver inputs, and a canonical per-run result schema.
 - It separates solver-disabled diagnostic rows from solver-assisted reference rows.
 - It reports action-attempt/success/no-op/fallback diagnostics.
 - It still does not establish trained-neural search-quality gains.
@@ -121,9 +123,19 @@ Exact enumeration accounting is intentionally explicit: Gray/kernel replay count
 
 Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOLD_WITNESS` proves only that some nonzero codeword has weight at most `W`; `CERTIFIED_NO_THRESHOLD_WITNESS` requires complete exact coverage or another explicit exact proof. CP-SAT feasibility statuses are therefore treated as threshold evidence only and are never labelled as minimum-distance certificates.
 
+## Frozen H-native benchmark protocol v1
+
+Section 25 defines protocol version `h-native-v1` as an immutable public-H benchmark manifest. The manifest stores each H matrix directly as canonical binary row strings rather than reconstructing cases from random seeds. It records stable case IDs, group IDs, train/validation/test splits, threshold tasks, label kinds, provenance, per-H SHA-256 digests, and the pinned manifest SHA-256:
+
+```text
+53a810e0a10031d95112cd42128203de6e5406e7c330fade882f4276968dd584
+```
+
+The protocol includes smoke and full subsets, separates solver-disabled and solver-assisted strata, treats candidate evaluations and solver calls as primary comparable resources, and keeps evaluator labels separate from solver-facing inputs. Larger public-H threshold challenges are explicitly unknown-distance cases; failure to find a witness is not a proof of nonexistence. Generated benchmark results are not committed.
+
 ## Next milestone
 
-The next technical milestone is a frozen H-native benchmark protocol with strong classical baselines before making any neural-quality claims.
+The next technical milestone is adding strong classical baselines against the frozen H-native benchmark protocol before making any neural-quality claims.
 
 ## Executable artifact
 
