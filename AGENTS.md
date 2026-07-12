@@ -126,6 +126,8 @@ Section 24 introduces the public parity-check representation `HCodeProblem` for 
 
 The certified exact oracle is deliberately scoped to tiny instances.  It enumerates all `2^k - 1` nonzero coefficient vectors in Gray-code order, updates `c = A u` incrementally, and reports `CERTIFIED_OPTIMUM` only after exhaustive coverage gives equal lower and upper bounds.  If `k` exceeds the configured cap, it returns `RESOURCE_LIMIT` without an exact-distance claim.  A direct coordinate-space `Hc = 0` enumerator is included only for very small differential tests.
 
+Exact enumeration accounting is intentionally explicit: Gray/kernel replay counts the `2^k - 1` nonzero coefficient vectors, while direct H-space replay counts all `2^n - 1` nonzero coordinate candidates and separately validates `2^k - 1` valid nonzero codewords satisfying `Hc = 0`. Certified optimum claims are independently replayed on these capped tiny instances before threshold status code trusts them. `PublicHSpanAdapter` is a hybrid-stack bridge only: it requires a concrete `W >= 1` and a nonzero kernel dimension; exact H-native oracle routines still handle trivial codes and `W = 0`. Independent replay has a hard cap of 12 (`k <= 12` for Gray/kernel replay and `n <= 12` for direct-H replay) and rejects oversized manual certified objects before exponential work begins.
+
 Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOLD_WITNESS` proves only that some nonzero codeword has weight at most `W`; `CERTIFIED_NO_THRESHOLD_WITNESS` requires complete exact coverage or another explicit exact proof.  CP-SAT feasibility statuses are therefore treated as threshold evidence only and are never labelled as minimum-distance certificates.
 
 ## Notebook validation command
