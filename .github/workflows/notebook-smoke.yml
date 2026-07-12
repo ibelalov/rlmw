@@ -52,6 +52,34 @@ jobs:
           python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
           python -O rlmw_research_corpus.py --self-test --print-summary
 
+      - name: Research baseline contracts
+        run: |
+          python -m py_compile rlmw_research_baselines.py test_rlmw_research_baselines.py
+          python rlmw_research_baselines.py self-test --print-summary
+          python -m unittest -v test_rlmw_research_baselines.py
+          python rlmw_research_baselines.py list --profile smoke --json >/tmp/rlmw_research_baseline_plan.json
+          mkdir -p /tmp/rlmw_research_baseline_smoke
+          python rlmw_research_baselines.py run \
+            --profile smoke \
+            --output-dir /tmp/rlmw_research_baseline_smoke
+          python rlmw_research_baselines.py validate \
+            /tmp/rlmw_research_baseline_smoke/rlmw_research_baseline_results.jsonl \
+            --print-summary
+          mkdir -p /tmp/rlmw_research_baseline_cp_sat
+          python rlmw_research_baselines.py run \
+            --profile smoke \
+            --baseline cp_sat_threshold_reference_v1 \
+            --case-id hnrv1-c0001 \
+            --output-dir /tmp/rlmw_research_baseline_cp_sat
+          python rlmw_research_baselines.py validate \
+            /tmp/rlmw_research_baseline_cp_sat/rlmw_research_baseline_results.jsonl \
+            --print-summary
+
+      - name: Optimized research baseline contracts
+        run: |
+          python -O rlmw_research_baselines.py self-test --print-summary
+          python -O -m unittest -v test_rlmw_research_baselines.py
+
       - name: Isolated Colab-like research loader
         run: |
           python - <<'PY'
@@ -59,11 +87,13 @@ jobs:
           nb = json.load(open('rlmw.ipynb'))
           cell = next(''.join(c.get('source', [])) for c in nb['cells'] if c.get('cell_type') == 'code' and 'load_research_corpus_dependencies' in ''.join(c.get('source', [])))
           isolated = pathlib.Path(tempfile.mkdtemp(prefix='rlmw_isolated_source_'))
+          os.environ.pop('RLMW_RESEARCH_CORPUS_REF', None)
           os.environ['RLMW_RESEARCH_CORPUS_BASE_URL'] = pathlib.Path.cwd().as_uri()
           g = {'SOURCE_ROOT': isolated, 'SMOKE': True, 'os': os, 'json': json}
           exec(compile(cell, 'rlmw.ipynb::research_loader_isolated', 'exec'), g)
           summary = g['_research_summary']
           assert summary['selected_cases'] == 9 and summary['total_cases'] == 23, summary
+          assert g['RLMW_RESEARCH_PINNED_REF'] == '68742bf8ee9a83179478b0080366c0dda345a26c', g['RLMW_RESEARCH_PINNED_REF']
           assert g['_research_load']['load_mode'] == 'fetched', g['_research_load']
           print(summary)
           PY

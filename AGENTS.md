@@ -2,7 +2,7 @@
 
 ## Project goal
 
-This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybrid symbolic/neural/Q-learning system for finding low-weight vectors in the binary column span of a matrix.
+This repo centers on the Colab notebook `rlmw.ipynb` for developing a hybrid symbolic/neural/Q-learning system for finding low-weight vectors in the binary column span of a matrix. Explicit standalone modules provide frozen research-corpus and classical-baseline contracts.
 
 ## Development rules
 
@@ -18,7 +18,7 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–25 are currently scaffolded as:
+Notebook sections 00–26 are currently scaffolded as:
 
 - **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
@@ -46,6 +46,7 @@ Notebook sections 00–25 are currently scaffolded as:
 - **23.** Optional Colab evidence exporter
 - **24.** H-native binary-code interface and exact small-instance oracle
 - **25.** Frozen H-native benchmark protocol v1
+- **26.** Research-scale public-H corpus manifest v1
 
 ## Mathematical invariants
 
@@ -89,9 +90,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Build a genuinely research-scale H-native corpus using standard code families and independent larger ensembles.
-2. Add strong classical baselines only after that corpus is reviewed.
-3. Revisit controlled neural-quality claims only after research-scale corpus and baselines exist.
+1. Audit the reproducible classical-baseline layer against the frozen research corpus.
+2. Run replicated classical experiments and improve bounds for unknown-distance cases without changing the frozen manifest silently.
+3. Revisit controlled neural-quality claims only after baseline measurements and ablations are stable.
 
 ## Review guidelines
 
@@ -134,6 +135,16 @@ The certified exact oracle is deliberately scoped to tiny instances.  It enumera
 Exact enumeration accounting is intentionally explicit: Gray/kernel replay counts the `2^k - 1` nonzero coefficient vectors, while direct H-space replay counts all `2^n - 1` nonzero coordinate candidates and separately validates `2^k - 1` valid nonzero codewords satisfying `Hc = 0`. Certified optimum claims are independently replayed on these capped tiny instances before threshold status code trusts them. `PublicHSpanAdapter` is a hybrid-stack bridge only: it requires a concrete `W >= 1` and a nonzero kernel dimension; exact H-native oracle routines still handle trivial codes and `W = 0`. Independent replay and primary exact enumeration share a hard cap of 12 (`k <= 12` for Gray/kernel replay and `n <= 12` for direct-H replay). Oversized requested caps are recorded with both requested/effective values in metadata, but enumeration returns structured `RESOURCE_LIMIT` instead of traversing beyond 12; oversized manual certified objects are rejected before exponential work begins.
 
 Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOLD_WITNESS` proves only that some nonzero codeword has weight at most `W`; `CERTIFIED_NO_THRESHOLD_WITNESS` requires complete exact coverage or another explicit exact proof.  CP-SAT feasibility statuses are therefore treated as threshold evidence only and are never labelled as minimum-distance certificates.
+
+## Research baseline protocol v1
+
+`rlmw_research_baselines.py` is intentionally standalone and is bound only to `h-native-research-v1`; do not reuse the Section 25 CI result registry for research-corpus records. Algorithms receive the allowlisted public solver payload only. Evaluator labels may be attached only after the run.
+
+The default CLI baselines are solver-disabled `uniform_kernel_sampling_v1`, `fixed_weight_subset_sampling_v1`, and `lee_brickell_isd_v1`. Optional `cp_sat_threshold_reference_v1` is a separate solver-assisted threshold-feasibility reference. Never pool its external witness count with solver-disabled candidate budgets.
+
+Persisted runs must use the exact frozen smoke/full configuration and pinned seed/repetition pairs. Every accepted incumbent must be nonzero and satisfy the original public `Hc=0`. Bounded exhaustion is not exclusion. A CP-SAT `INFEASIBLE` result certifies only the stated threshold model, while `UNKNOWN` certifies nothing.
+
+Canonical JSONL output is generated data and must not be committed. Before changing baseline contracts, run both normal and `python -O` self-tests and independent unittests. The specification is `RESEARCH_BASELINES.md`.
 
 ## Notebook validation command
 

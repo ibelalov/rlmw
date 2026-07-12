@@ -20,6 +20,10 @@ Families included:
 
 The corpus has separate smoke and full subsets. Smoke validation is bounded and intended for CI/Colab contract checks only; full corpus execution is deliberately not part of CI.
 
+Smoke validation still recomputes the digest of the complete materialized manifest, binds it to the frozen external digest above, and checks global metadata, declared-hash syntax, solver-payload isolation, split counts, and group, construction-lineage, and declared-row-space isolation across all 23 cases. Exact parsing of `H`, rank computation, raw-`H` and reduced-row-space hash recomputation, and family-specific independent certificate checks are performed only for the nine smoke-tagged cases. Full validation performs those exact matrix-derived checks for all 23 cases and also checks deterministic regeneration of the complete manifest.
+
+For a genuinely bounded smoke path, validate the materialized JSON file. `--validate generated` first constructs the complete corpus by definition and is therefore a generator/full-construction check even when combined with `--smoke`.
+
 ## Labels and payload separation
 
 Each case records canonical public `H_rows`, raw-H hash, row-space hash, family, size, rank, dimension, construction parameters, provenance, split, group IDs, and label semantics.
@@ -43,7 +47,9 @@ Train/validation/test isolation is enforced by construction and validation. Row-
 ## Validation commands
 
 ```bash
-python rlmw_research_corpus.py --validate generated --smoke --print-summary
+python rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --smoke --print-summary
 python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --smoke --print-summary
+python rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
+python rlmw_research_corpus.py --validate generated --print-summary
 python -m json.tool h_native_research_v1_manifest.json >/tmp/h_native_research_v1_manifest.pretty.json
 ```
