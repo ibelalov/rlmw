@@ -56,7 +56,7 @@ jobs:
             --ExecutePreprocessor.timeout=900
 
 
-      - name: Optimized certificate validation
+      - name: Optimized certificate and protocol-contract validation
         run: |
           python -O - <<'PY'
           import json, os
@@ -71,12 +71,19 @@ jobs:
                   continue
               code = ''.join(cell.get('source', []))
               exec(compile(code, f'rlmw.ipynb::cell_{i}', 'exec'), g)
-              if 'run_h_native_certificate_validation_self_tests' in g:
+              if 'run_h_native_v1_protocol_self_tests' in g:
                   g['run_h_native_certificate_validation_self_tests']()
+                  g['run_h_native_v1_protocol_self_tests']()
+                  try:
+                      g['verify_h_native_v1_manifest_digest']('0' * 64)
+                  except ValueError:
+                      pass
+                  else:
+                      raise RuntimeError('incorrect manifest digest unexpectedly passed under python -O')
                   break
           else:
-              raise RuntimeError('certificate validation self-tests were not defined')
-          print('optimized certificate validation passed')
+              raise RuntimeError('protocol validation self-tests were not defined')
+          print('optimized certificate and protocol-contract validation passed')
           PY
 
       - name: Export and validate evidence bundle

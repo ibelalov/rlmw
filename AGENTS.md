@@ -18,7 +18,7 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–24 are currently scaffolded as:
+Notebook sections 00–25 are currently scaffolded as:
 
 - **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
@@ -45,6 +45,7 @@ Notebook sections 00–24 are currently scaffolded as:
 - **22.** Calibrated neural diagnostic evaluation
 - **23.** Optional Colab evidence exporter
 - **24.** H-native binary-code interface and exact small-instance oracle
+- **25.** Frozen H-native benchmark protocol v1
 
 ## Mathematical invariants
 
@@ -76,6 +77,7 @@ For binary matrix A over F_2:
 - Action attempts/successes/no-ops/fallback diagnostics are reported.
 - Neural smoke diagnostics verify plumbing/action execution but do not establish trained-neural search superiority.
 - Certified optimum mode exists only inside the capped exhaustive Section 24 oracle; the hybrid solver, CP-SAT threshold checks, and neural diagnostics remain non-optimality-certifying.
+- Section 25 defines public-H benchmark protocol `h-native-protocol-v1` / `h-native-ci-v1` with manifest digest `89f1cdcdab541db4bab72726b33b5ff7bf980742d6b26166a6b6c52a0800a561`; it uses opaque case IDs, canonical H row strings, raw-H/RREF digests, group/hash-isolated splits, smoke/full run specs, solver strata, no-leakage solver payloads, and result schemas without making benchmark-performance claims.
 
 ## Result semantics
 
@@ -87,10 +89,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Freeze an H-native benchmark protocol.
-2. Add strong classical baselines for public-H comparisons.
-3. Only then revisit controlled neural-quality claims.
-4. Larger performance work only after measurement justifies it.
+1. Build a genuinely research-scale H-native corpus using standard code families and independent larger ensembles.
+2. Add strong classical baselines only after that corpus is reviewed.
+3. Revisit controlled neural-quality claims only after research-scale corpus and baselines exist.
 
 ## Review guidelines
 
@@ -119,6 +120,10 @@ For binary matrix A over F_2:
 - Ensure every returned candidate is exactly verified.
 - Do not confuse solver-assisted results with neural gains.
 - Do not commit generated benchmark artifacts, plots, datasets, or checkpoints unless explicitly requested.
+
+## Frozen H-native benchmark protocol v1
+
+Section 25 defines protocol version `h-native-protocol-v1` / `h-native-ci-v1`. Cases must expose algorithm-facing data as public `H`, public `W`, opaque case ID, selected budget/run spec, and allowed algorithm configuration only. Evaluator-only labels, group/split/provenance, certified distances, and planted metadata must not enter solver payloads. Research-scale unknown-distance cases are deferred to the next milestone and must not be inferred from this CI manifest. Solver-disabled and solver-assisted strata must remain separate, and registry binding must reject fake IDs or altered H/W.
 
 ## H-native interface and tiny exact oracle
 
