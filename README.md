@@ -162,7 +162,7 @@ This branch adds a distinct deterministic research-corpus manifest, `h-native-re
 The manifest digest is:
 
 ```text
-61fa35025f2002a6df4cc505044f3048c5160d18a0d521f20713d48960985965
+b9ce7369cf3d2f1476390b8f1e823bf33d10268b1b0112cf55197ce4fff18559
 ```
 
 The corpus covers Hamming, extended Hamming, Reed--Muller RM(1, m) controls, sparse LDPC-style parity-check ensembles, and dense random full-rank parity-check ensembles. It is for corpus construction and validation only; it does not make benchmark-performance, neural-quality, or optimization claims.

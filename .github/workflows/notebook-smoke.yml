@@ -41,6 +41,33 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m ipykernel install --user --name python3
 
+      - name: Research corpus validation
+        run: |
+          python -m py_compile rlmw_research_corpus.py
+          python -m json.tool h_native_research_v1_manifest.json >/tmp/h_native_research_v1_manifest.pretty.json
+          python rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --smoke --print-summary
+          python rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
+          python rlmw_research_corpus.py --self-test --print-summary
+          python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --smoke --print-summary
+          python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
+          python -O rlmw_research_corpus.py --self-test --print-summary
+
+      - name: Isolated Colab-like research loader
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, tempfile
+          nb = json.load(open('rlmw.ipynb'))
+          cell = next(''.join(c.get('source', [])) for c in nb['cells'] if c.get('cell_type') == 'code' and 'load_research_corpus_dependencies' in ''.join(c.get('source', [])))
+          isolated = pathlib.Path(tempfile.mkdtemp(prefix='rlmw_isolated_source_'))
+          os.environ['RLMW_RESEARCH_CORPUS_BASE_URL'] = pathlib.Path.cwd().as_uri()
+          g = {'SOURCE_ROOT': isolated, 'SMOKE': True, 'os': os, 'json': json}
+          exec(compile(cell, 'rlmw.ipynb::research_loader_isolated', 'exec'), g)
+          summary = g['_research_summary']
+          assert summary['selected_cases'] == 9 and summary['total_cases'] == 23, summary
+          assert g['_research_load']['load_mode'] == 'fetched', g['_research_load']
+          print(summary)
+          PY
+
       - name: Execute notebook
         run: |
           mkdir -p /tmp/rlmw_nb

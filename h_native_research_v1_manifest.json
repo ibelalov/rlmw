@@ -26,6 +26,7 @@
         "method": "all_nonzero_binary_columns",
         "provenance": "Hamming 1950"
       },
+      "construction_lineage_id": "hamming:all_nonzero_binary_columns:cid0001",
       "family": "hamming",
       "group_id": "hnrv1-t-hamming-g0001",
       "k": 57,
@@ -66,6 +67,7 @@
         "method": "hamming_plus_overall_parity",
         "provenance": "Hamming 1950; extended parity-check construction"
       },
+      "construction_lineage_id": "extended_hamming:hamming_plus_overall_parity:cid0002",
       "family": "extended_hamming",
       "group_id": "hnrv1-t-extended-hamming-g0002",
       "k": 57,
@@ -105,6 +107,7 @@
         "method": "all_nonzero_binary_columns",
         "provenance": "Hamming 1950"
       },
+      "construction_lineage_id": "hamming:all_nonzero_binary_columns:cid0003",
       "family": "hamming",
       "group_id": "hnrv1-t-hamming-g0003",
       "k": 120,
@@ -146,6 +149,7 @@
         "method": "hamming_plus_overall_parity",
         "provenance": "Hamming 1950; extended parity-check construction"
       },
+      "construction_lineage_id": "extended_hamming:hamming_plus_overall_parity:cid0004",
       "family": "extended_hamming",
       "group_id": "hnrv1-t-extended-hamming-g0004",
       "k": 120,
@@ -186,6 +190,7 @@
         "method": "all_nonzero_binary_columns",
         "provenance": "Hamming 1950"
       },
+      "construction_lineage_id": "hamming:all_nonzero_binary_columns:cid0005",
       "family": "hamming",
       "group_id": "hnrv1-v-hamming-g0005",
       "k": 247,
@@ -201,7 +206,6 @@
       "rowspace_sha256": "129f7f04d3c9d983e1620124b84cbecdbf6ac65bf97e99e766a49a59dd6ae9cc",
       "split": "validation",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -228,6 +232,7 @@
         "method": "hamming_plus_overall_parity",
         "provenance": "Hamming 1950; extended parity-check construction"
       },
+      "construction_lineage_id": "extended_hamming:hamming_plus_overall_parity:cid0006",
       "family": "extended_hamming",
       "group_id": "hnrv1-v-extended-hamming-g0006",
       "k": 247,
@@ -269,6 +274,7 @@
         "method": "all_nonzero_binary_columns",
         "provenance": "Hamming 1950"
       },
+      "construction_lineage_id": "hamming:all_nonzero_binary_columns:cid0007",
       "family": "hamming",
       "group_id": "hnrv1-t-hamming-g0007",
       "k": 502,
@@ -284,7 +290,6 @@
       "rowspace_sha256": "0abb5fb762d43d423cc88d6c2cd5305444737ed5686a0d12ef18d23bde83b931",
       "split": "test",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -312,6 +317,7 @@
         "method": "hamming_plus_overall_parity",
         "provenance": "Hamming 1950; extended parity-check construction"
       },
+      "construction_lineage_id": "extended_hamming:hamming_plus_overall_parity:cid0008",
       "family": "extended_hamming",
       "group_id": "hnrv1-t-extended-hamming-g0008",
       "k": 502,
@@ -336,6 +342,12 @@
     },
     {
       "H_rows": [
+        "11111111111111111111111111111111",
+        "01010101010101010101010101010101",
+        "00110011001100110011001100110011",
+        "00001111000011110000111100001111",
+        "00000000111111110000000011111111",
+        "00000000000000001111111111111111",
         "00010001000100010001000100010001",
         "00000101000001010000010100000101",
         "00000000010101010000000001010101",
@@ -355,13 +367,7 @@
         "00000000000000110000000000000011",
         "00000000000000000000001100000011",
         "00000000000000000000000000110011",
-        "00000000000000000000000000001111",
-        "00000000000000010000000000000001",
-        "00000000000000000000000100000001",
-        "00000000000000000000000000010001",
-        "00000000000000000000000000000101",
-        "00000000000000000000000000000011",
-        "00000000000000000000000000000001"
+        "00000000000000000000000000001111"
       ],
       "base_group_id": "hnrv1-t-reed-muller-rm1-control-b0009",
       "case_id": "hnrv1-c0009",
@@ -370,6 +376,7 @@
         "method": "orthogonal_complement_of_RM(1,m)_generator",
         "provenance": "Muller 1954; Reed 1954"
       },
+      "construction_lineage_id": "reed_muller_rm1_control:orthogonal_complement_of_RM(1,m)_generator:cid0009",
       "family": "reed_muller_rm1_control",
       "group_id": "hnrv1-t-reed-muller-rm1-control-g0009",
       "k": 6,
@@ -381,8 +388,8 @@
       "n": 32,
       "provenance": "Muller 1954; Reed 1954",
       "rank": 26,
-      "raw_H_sha256": "22acc17c1f72dbf6b65c3d14ade6ccc07c5db8596fd41b0d8ec532f449daaeee",
-      "rowspace_sha256": "984eb36bfde7ac473ba177834d009bbf4be47b171bd8d672d28b3fda0562a93c",
+      "raw_H_sha256": "1edb081ff5afd42caa4038ea1a708b05a9ea39b9e1d43259d188755d4ef084bc",
+      "rowspace_sha256": "b1c4f2f3bcd242eae08852933fa1419ad0d136fed214d94e3736fdd2d59a1482",
       "split": "train",
       "subset": [
         "smoke",
@@ -395,6 +402,13 @@
     },
     {
       "H_rows": [
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "0101010101010101010101010101010101010101010101010101010101010101",
+        "0011001100110011001100110011001100110011001100110011001100110011",
+        "0000111100001111000011110000111100001111000011110000111100001111",
+        "0000000011111111000000001111111100000000111111110000000011111111",
+        "0000000000000000111111111111111100000000000000001111111111111111",
+        "0000000000000000000000000000000011111111111111111111111111111111",
         "0001000100010001000100010001000100010001000100010001000100010001",
         "0000010100000101000001010000010100000101000001010000010100000101",
         "0000000001010101000000000101010100000000010101010000000001010101",
@@ -444,14 +458,7 @@
         "0000000000000000000000000000000000000000000000110000000000000011",
         "0000000000000000000000000000000000000000000000000000001100000011",
         "0000000000000000000000000000000000000000000000000000000000110011",
-        "0000000000000000000000000000000000000000000000000000000000001111",
-        "0000000000000000000000000000000100000000000000000000000000000001",
-        "0000000000000000000000000000000000000000000000010000000000000001",
-        "0000000000000000000000000000000000000000000000000000000100000001",
-        "0000000000000000000000000000000000000000000000000000000000010001",
-        "0000000000000000000000000000000000000000000000000000000000000101",
-        "0000000000000000000000000000000000000000000000000000000000000011",
-        "0000000000000000000000000000000000000000000000000000000000000001"
+        "0000000000000000000000000000000000000000000000000000000000001111"
       ],
       "base_group_id": "hnrv1-v-reed-muller-rm1-control-b0010",
       "case_id": "hnrv1-c0010",
@@ -460,6 +467,7 @@
         "method": "orthogonal_complement_of_RM(1,m)_generator",
         "provenance": "Muller 1954; Reed 1954"
       },
+      "construction_lineage_id": "reed_muller_rm1_control:orthogonal_complement_of_RM(1,m)_generator:cid0010",
       "family": "reed_muller_rm1_control",
       "group_id": "hnrv1-v-reed-muller-rm1-control-g0010",
       "k": 7,
@@ -471,11 +479,10 @@
       "n": 64,
       "provenance": "Muller 1954; Reed 1954",
       "rank": 57,
-      "raw_H_sha256": "a8f88e5282257d43472e359113e3c9f78b62091c651c0504cb9d895150b12588",
-      "rowspace_sha256": "5eee7854f9b62ebf4fb2c2166572a4b5a8de86c05019f10eff91a95dae51841b",
+      "raw_H_sha256": "695370e39cec14ab133774aacab3de0a29f416ac8b2005e5d04d9f76c22566d2",
+      "rowspace_sha256": "ec1b4b35b048c95ce87159c33ab3a668eaf5115348483cdfa3f0ce903ae7c432",
       "split": "validation",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -485,6 +492,14 @@
     },
     {
       "H_rows": [
+        "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+        "01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101",
+        "00110011001100110011001100110011001100110011001100110011001100110011001100110011001100110011001100110011001100110011001100110011",
+        "00001111000011110000111100001111000011110000111100001111000011110000111100001111000011110000111100001111000011110000111100001111",
+        "00000000111111110000000011111111000000001111111100000000111111110000000011111111000000001111111100000000111111110000000011111111",
+        "00000000000000001111111111111111000000000000000011111111111111110000000000000000111111111111111100000000000000001111111111111111",
+        "00000000000000000000000000000000111111111111111111111111111111110000000000000000000000000000000011111111111111111111111111111111",
+        "00000000000000000000000000000000000000000000000000000000000000001111111111111111111111111111111111111111111111111111111111111111",
         "00010001000100010001000100010001000100010001000100010001000100010001000100010001000100010001000100010001000100010001000100010001",
         "00000101000001010000010100000101000001010000010100000101000001010000010100000101000001010000010100000101000001010000010100000101",
         "00000000010101010000000001010101000000000101010100000000010101010000000001010101000000000101010100000000010101010000000001010101",
@@ -596,15 +611,7 @@
         "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000110000000000000011",
         "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001100000011",
         "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000110011",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001111",
-        "00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000001",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000001",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000001",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010001",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000101",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011",
-        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+        "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001111"
       ],
       "base_group_id": "hnrv1-t-reed-muller-rm1-control-b0011",
       "case_id": "hnrv1-c0011",
@@ -613,6 +620,7 @@
         "method": "orthogonal_complement_of_RM(1,m)_generator",
         "provenance": "Muller 1954; Reed 1954"
       },
+      "construction_lineage_id": "reed_muller_rm1_control:orthogonal_complement_of_RM(1,m)_generator:cid0011",
       "family": "reed_muller_rm1_control",
       "group_id": "hnrv1-t-reed-muller-rm1-control-g0011",
       "k": 8,
@@ -624,11 +632,10 @@
       "n": 128,
       "provenance": "Muller 1954; Reed 1954",
       "rank": 120,
-      "raw_H_sha256": "a1ba06688fe8308a956cdf6e0199ab8c8513d668e6fc907d500a538069637f9c",
-      "rowspace_sha256": "1be52d4fee8c049da55be208425b29476faee888d450e5d57f5863039bc78490",
+      "raw_H_sha256": "723a1623e26eb1723929df249fd7aa57781378a5cf2305ae9113278281611400",
+      "rowspace_sha256": "6f41fb2de2de5308bbb864d5ec37a7bf7e2a6a8fdb6738f9bc16e49606590c78",
       "split": "test",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -697,6 +704,7 @@
         "rows": 48,
         "seed": 1101
       },
+      "construction_lineage_id": "sparse_ldpc_style:deterministic_regular_sparse_parity_check:cid0012",
       "family": "sparse_ldpc_style",
       "group_id": "hnrv1-t-sparse-ldpc-style-g0012",
       "k": 48,
@@ -799,6 +807,7 @@
         "rows": 64,
         "seed": 2202
       },
+      "construction_lineage_id": "sparse_ldpc_style:deterministic_regular_sparse_parity_check:cid0013",
       "family": "sparse_ldpc_style",
       "group_id": "hnrv1-v-sparse-ldpc-style-g0013",
       "k": 64,
@@ -909,6 +918,7 @@
         "rows": 72,
         "seed": 3303
       },
+      "construction_lineage_id": "sparse_ldpc_style:deterministic_regular_sparse_parity_check:cid0014",
       "family": "sparse_ldpc_style",
       "group_id": "hnrv1-t-sparse-ldpc-style-g0014",
       "k": 72,
@@ -926,7 +936,6 @@
       "rowspace_sha256": "47e1846d26b54191bed8e11b5abae5ee245d438f9ec3a3e4b7b1bc501bea581b",
       "split": "test",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -1003,6 +1012,7 @@
         "rows": 56,
         "seed": 4404
       },
+      "construction_lineage_id": "sparse_ldpc_style:deterministic_regular_sparse_parity_check:cid0015",
       "family": "sparse_ldpc_style",
       "group_id": "hnrv1-t-sparse-ldpc-style-g0015",
       "k": 56,
@@ -1113,6 +1123,7 @@
         "rows": 72,
         "seed": 5505
       },
+      "construction_lineage_id": "sparse_ldpc_style:deterministic_regular_sparse_parity_check:cid0016",
       "family": "sparse_ldpc_style",
       "group_id": "hnrv1-v-sparse-ldpc-style-g0016",
       "k": 72,
@@ -1130,7 +1141,6 @@
       "rowspace_sha256": "de0536cf16c9b7339a2fceec98c73d2e13cd3b702c605bfcf18febf51727db61",
       "split": "validation",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -1231,6 +1241,7 @@
         "rows": 80,
         "seed": 6606
       },
+      "construction_lineage_id": "sparse_ldpc_style:deterministic_regular_sparse_parity_check:cid0017",
       "family": "sparse_ldpc_style",
       "group_id": "hnrv1-t-sparse-ldpc-style-g0017",
       "k": 80,
@@ -1248,7 +1259,6 @@
       "rowspace_sha256": "4554c2f90bd36c60f45b5e37078afb426fe8dcf34394d389c17f04255fe5ace2",
       "split": "test",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -1316,6 +1326,7 @@
         "rows": 48,
         "seed": 7707
       },
+      "construction_lineage_id": "dense_random_full_rank:deterministic_dense_full_rank_binary_matrix:cid0018",
       "family": "dense_random_full_rank",
       "group_id": "hnrv1-t-dense-random-full-rank-g0018",
       "k": 48,
@@ -1417,6 +1428,7 @@
         "rows": 64,
         "seed": 8808
       },
+      "construction_lineage_id": "dense_random_full_rank:deterministic_dense_full_rank_binary_matrix:cid0019",
       "family": "dense_random_full_rank",
       "group_id": "hnrv1-v-dense-random-full-rank-g0019",
       "k": 64,
@@ -1526,6 +1538,7 @@
         "rows": 72,
         "seed": 9909
       },
+      "construction_lineage_id": "dense_random_full_rank:deterministic_dense_full_rank_binary_matrix:cid0020",
       "family": "dense_random_full_rank",
       "group_id": "hnrv1-t-dense-random-full-rank-g0020",
       "k": 72,
@@ -1543,7 +1556,6 @@
       "rowspace_sha256": "4b8f0eade8ea265ec1268e561c55c50d03bc3645c667a2364d0066f6626ead94",
       "split": "test",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -1619,6 +1631,7 @@
         "rows": 56,
         "seed": 1010
       },
+      "construction_lineage_id": "dense_random_full_rank:deterministic_dense_full_rank_binary_matrix:cid0021",
       "family": "dense_random_full_rank",
       "group_id": "hnrv1-t-dense-random-full-rank-g0021",
       "k": 56,
@@ -1728,6 +1741,7 @@
         "rows": 72,
         "seed": 2020
       },
+      "construction_lineage_id": "dense_random_full_rank:deterministic_dense_full_rank_binary_matrix:cid0022",
       "family": "dense_random_full_rank",
       "group_id": "hnrv1-v-dense-random-full-rank-g0022",
       "k": 72,
@@ -1745,7 +1759,6 @@
       "rowspace_sha256": "2221805a5ff6f755006934af28608972609ed0a1dd3c4ce03aa85ebf642d77ad",
       "split": "validation",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -1845,6 +1858,7 @@
         "rows": 80,
         "seed": 3030
       },
+      "construction_lineage_id": "dense_random_full_rank:deterministic_dense_full_rank_binary_matrix:cid0023",
       "family": "dense_random_full_rank",
       "group_id": "hnrv1-t-dense-random-full-rank-g0023",
       "k": 80,
@@ -1862,7 +1876,6 @@
       "rowspace_sha256": "a582e306cd6bd72e46668c9ce9fe85257e0226408d13dfdc6df5e58641252867",
       "split": "test",
       "subset": [
-        "full",
         "full"
       ],
       "threshold": {
@@ -1873,7 +1886,7 @@
   ],
   "description": "Research-scale public-H binary-code corpus specification; no benchmark conclusions.",
   "manifest_id": "h-native-research-v1",
-  "manifest_sha256": "61fa35025f2002a6df4cc505044f3048c5160d18a0d521f20713d48960985965",
+  "manifest_sha256": "b9ce7369cf3d2f1476390b8f1e823bf33d10268b1b0112cf55197ce4fff18559",
   "protocol_version": "h-native-research-v1",
   "references": [
     "R. W. Hamming, Error detecting and error correcting codes, Bell System Technical Journal, 1950.",
