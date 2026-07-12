@@ -55,6 +55,30 @@ jobs:
             --ExecutePreprocessor.kernel_name=python3 \
             --ExecutePreprocessor.timeout=900
 
+
+      - name: Optimized certificate validation
+        run: |
+          python -O - <<'PY'
+          import json, os
+          os.environ['RLMW_HEADLESS'] = '1'
+          os.environ['RLMW_SMOKE'] = '1'
+          os.environ['RLMW_PROJECT_ROOT'] = '/tmp/rlmw_opt'
+          os.environ['RLMW_SOURCE_ROOT'] = os.environ.get('GITHUB_WORKSPACE', '')
+          nb = json.load(open('rlmw.ipynb'))
+          g = {}
+          for i, cell in enumerate(nb['cells']):
+              if cell.get('cell_type') != 'code':
+                  continue
+              code = ''.join(cell.get('source', []))
+              exec(compile(code, f'rlmw.ipynb::cell_{i}', 'exec'), g)
+              if 'run_h_native_certificate_validation_self_tests' in g:
+                  g['run_h_native_certificate_validation_self_tests']()
+                  break
+          else:
+              raise RuntimeError('certificate validation self-tests were not defined')
+          print('optimized certificate validation passed')
+          PY
+
       - name: Export and validate evidence bundle
         run: |
           mkdir -p /tmp/rlmw_nb /tmp/rlmw_evidence
