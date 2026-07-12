@@ -179,3 +179,7 @@ python -O rlmw_research_baselines.py self-test --print-summary
 ```
 
 Generated result JSONL files are not source artifacts and must not be committed. This layer establishes infrastructure and smoke correctness only; it contains no solver-superiority or neural-quality conclusion.
+
+### Research-corpus small-circuit audit
+
+`rlmw_research_corpus_audit.py` and `RESEARCH_CORPUS_AUDIT.md` add an independently replayable ordered-split subset-XOR audit for the twelve unknown-distance `h-native-research-v1` cases through weight 6. The audit reproduces exact small circuits for `hnrv1-c0012`, `hnrv1-c0013`, `hnrv1-c0020`, `hnrv1-c0022`, and `hnrv1-c0023`, and lower bounds `d>=7` for `hnrv1-c0014` through `hnrv1-c0019` plus `hnrv1-c0021`. These results quarantine v1 as a contract/audit corpus only: it must not support solver-superiority, neural-quality, RL-quality, or benchmark-difficulty claims. The next milestone is a separately reviewed `h-native-research-v2` design using coordinate-independent deterministic randomness and preregistered calibration.
