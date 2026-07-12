@@ -69,7 +69,7 @@ Current notebook sections are:
 - Section 24 H-native parity-check interface derives an exact `A` basis with `H A = 0` over `F_2`, preserving the original coordinate order of `H`.
 - Section 24 exact tiny oracle exhaustively enumerates all nonzero kernel coefficients in Gray-code order under a conservative dimension cap; it is for small CI/Colab checks, not cryptographic or large coding-theory scale claims.
 - Section 24 distinguishes `CERTIFIED_OPTIMUM`, `CERTIFIED_TRIVIAL_CODE`, `VERIFIED_THRESHOLD_WITNESS`, `CERTIFIED_NO_THRESHOLD_WITNESS`, `RESOURCE_LIMIT`, and `INCONCLUSIVE`; a threshold witness proves only `d <= W`, not optimality.
-- Section 25 defines public-H benchmark protocol `h-native-v1` with canonical H matrices, raw-H/RREF SHA-256 digests, manifest digest `c55c8e317f5853fecb50cd7deec8a64c69e7b0b34b3c43194a237d73c8434c46`, 15 tasks over 13 distinct matrices, group/hash-isolated train/validation/test splits, smoke/full run specifications, no-leakage solver payloads, and canonical evaluator/input/result JSON schemas.
+- Section 25 defines public-H benchmark protocol `h-native-protocol-v1` / `h-native-ci-v1` with canonical H matrices, raw-H/RREF SHA-256 digests, manifest digest `89f1cdcdab541db4bab72726b33b5ff7bf980742d6b26166a6b6c52a0800a561`, 15 tasks over 14 distinct matrices, group/hash-isolated train/validation/test splits, smoke/full run specifications, no-leakage solver payloads, and canonical evaluator/input/result JSON schemas.
 - It separates solver-disabled diagnostic rows from solver-assisted reference rows.
 - It reports action-attempt/success/no-op/fallback diagnostics.
 - It still does not establish trained-neural search-quality gains.
@@ -125,17 +125,17 @@ Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOL
 
 ## Frozen H-native benchmark protocol v1
 
-Section 25 defines protocol version `h-native-v1` as a public-H benchmark manifest with explicit canonical JSON serialization. The manifest stores each H matrix directly as canonical binary row strings rather than reconstructing cases from random seeds. It records 15 tasks over 13 distinct matrices: 6 exactly certified controls and 9 beyond-cap unknown-distance threshold challenges. Each split has 5 tasks, and the three public-H size/rate strata appear independently in train, validation, and test. The pinned manifest SHA-256 is:
+Section 25 defines protocol version `h-native-protocol-v1` / `h-native-ci-v1` as a public-H benchmark manifest with explicit canonical JSON serialization. The manifest stores each H matrix directly as canonical binary row strings rather than reconstructing cases from random seeds. It records 15 tasks over 14 distinct matrices: 6 exactly certified controls and 9 larger CI controls certified by exhaustive column-subset dependency checks. Each split has 5 tasks, and the three public-H size/rate strata appear independently in train, validation, and test. The pinned manifest SHA-256 is:
 
 ```text
-c55c8e317f5853fecb50cd7deec8a64c69e7b0b34b3c43194a237d73c8434c46
+89f1cdcdab541db4bab72726b33b5ff7bf980742d6b26166a6b6c52a0800a561
 ```
 
 The protocol includes 6 smoke tasks, all 15 full tasks, 2 smoke run specs, and 4 full run specs. Solver-disabled and solver-assisted strata remain separate, candidate evaluations and solver calls are primary comparable resources, evaluator labels are separate from solver payloads, and generated benchmark results are not committed.
 
 ## Next milestone
 
-The next technical milestone is adding strong classical baselines against the frozen H-native benchmark protocol before making any neural-quality claims.
+The next technical milestone is a genuinely research-scale H-native corpus using standard code families and independent larger ensembles; strong classical baselines follow after that corpus is reviewed.
 
 ## Executable artifact
 

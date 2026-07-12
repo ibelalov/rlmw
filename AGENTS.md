@@ -77,7 +77,7 @@ For binary matrix A over F_2:
 - Action attempts/successes/no-ops/fallback diagnostics are reported.
 - Neural smoke diagnostics verify plumbing/action execution but do not establish trained-neural search superiority.
 - Certified optimum mode exists only inside the capped exhaustive Section 24 oracle; the hybrid solver, CP-SAT threshold checks, and neural diagnostics remain non-optimality-certifying.
-- Section 25 defines public-H benchmark protocol `h-native-v1` with manifest digest `c55c8e317f5853fecb50cd7deec8a64c69e7b0b34b3c43194a237d73c8434c46`; it uses opaque case IDs, canonical H row strings, raw-H/RREF digests, group/hash-isolated splits, smoke/full run specs, solver strata, no-leakage solver payloads, and result schemas without making benchmark-performance claims.
+- Section 25 defines public-H benchmark protocol `h-native-protocol-v1` / `h-native-ci-v1` with manifest digest `89f1cdcdab541db4bab72726b33b5ff7bf980742d6b26166a6b6c52a0800a561`; it uses opaque case IDs, canonical H row strings, raw-H/RREF digests, group/hash-isolated splits, smoke/full run specs, solver strata, no-leakage solver payloads, and result schemas without making benchmark-performance claims.
 
 ## Result semantics
 
@@ -89,9 +89,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Add strong classical baselines for public-H comparisons against frozen `h-native-v1`.
-2. Revisit controlled neural-quality claims only after those baselines exist.
-3. Larger performance work only after measurement justifies it.
+1. Build a genuinely research-scale H-native corpus using standard code families and independent larger ensembles.
+2. Add strong classical baselines only after that corpus is reviewed.
+3. Revisit controlled neural-quality claims only after research-scale corpus and baselines exist.
 
 ## Review guidelines
 
@@ -123,7 +123,7 @@ For binary matrix A over F_2:
 
 ## Frozen H-native benchmark protocol v1
 
-Section 25 defines protocol version `h-native-v1`. Cases must expose algorithm-facing data as public `H`, public `W`, opaque case ID, selected budget/run spec, and allowed algorithm configuration only. Evaluator-only labels, group/split/provenance, certified distances, and planted metadata must not enter solver payloads. Unknown-distance cases must exceed the exact-oracle cap and must never be reported as certified optima or certified no-solution results. Solver-disabled and solver-assisted strata must remain separate, and registry binding must reject fake IDs or altered H/W.
+Section 25 defines protocol version `h-native-protocol-v1` / `h-native-ci-v1`. Cases must expose algorithm-facing data as public `H`, public `W`, opaque case ID, selected budget/run spec, and allowed algorithm configuration only. Evaluator-only labels, group/split/provenance, certified distances, and planted metadata must not enter solver payloads. Research-scale unknown-distance cases are deferred to the next milestone and must not be inferred from this CI manifest. Solver-disabled and solver-assisted strata must remain separate, and registry binding must reject fake IDs or altered H/W.
 
 ## H-native interface and tiny exact oracle
 
