@@ -18,7 +18,7 @@ This repo contains a single Colab notebook, `rlmw.ipynb`, for developing a hybri
 
 ## Current scaffold status
 
-Notebook sections 00–24 are currently scaffolded as:
+Notebook sections 00–25 are currently scaffolded as:
 
 - **00.** Setup, environment detection, paths, Colab dependency bootstrap
 - **01.** Binary linear algebra over F_2
