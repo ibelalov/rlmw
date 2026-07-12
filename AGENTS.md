@@ -77,7 +77,7 @@ For binary matrix A over F_2:
 - Action attempts/successes/no-ops/fallback diagnostics are reported.
 - Neural smoke diagnostics verify plumbing/action execution but do not establish trained-neural search superiority.
 - Certified optimum mode exists only inside the capped exhaustive Section 24 oracle; the hybrid solver, CP-SAT threshold checks, and neural diagnostics remain non-optimality-certifying.
-- Section 25 freezes public-H benchmark protocol `h-native-v1` with manifest digest `53a810e0a10031d95112cd42128203de6e5406e7c330fade882f4276968dd584`; it defines canonical H row strings, group-disjoint splits, smoke/full budgets, solver strata, no-leakage solver inputs, and result schemas without making benchmark-performance claims.
+- Section 25 defines public-H benchmark protocol `h-native-v1` with manifest digest `c55c8e317f5853fecb50cd7deec8a64c69e7b0b34b3c43194a237d73c8434c46`; it uses opaque case IDs, canonical H row strings, raw-H/RREF digests, group/hash-isolated splits, smoke/full run specs, solver strata, no-leakage solver payloads, and result schemas without making benchmark-performance claims.
 
 ## Result semantics
 
@@ -123,7 +123,7 @@ For binary matrix A over F_2:
 
 ## Frozen H-native benchmark protocol v1
 
-Section 25 defines immutable protocol version `h-native-v1`. Cases must expose solver-facing data as public `H`, public `W`, case identity, split/group identity, and permitted configuration only. Evaluator-only labels such as certified distance must remain structurally separate, and planted witnesses or reserved planted metadata must not enter solver inputs. Unknown-distance threshold-challenge cases must never be reported as certified optima or certified no-solution results. Solver-disabled and solver-assisted strata must remain separate.
+Section 25 defines protocol version `h-native-v1`. Cases must expose algorithm-facing data as public `H`, public `W`, opaque case ID, selected budget/run spec, and allowed algorithm configuration only. Evaluator-only labels, group/split/provenance, certified distances, and planted metadata must not enter solver payloads. Unknown-distance cases must exceed the exact-oracle cap and must never be reported as certified optima or certified no-solution results. Solver-disabled and solver-assisted strata must remain separate, and registry binding must reject fake IDs or altered H/W.
 
 ## H-native interface and tiny exact oracle
 
