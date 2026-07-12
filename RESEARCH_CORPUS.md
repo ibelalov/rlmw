@@ -7,7 +7,7 @@
 The generated manifest contains 23 public-H cases split by construction into train/validation/test groups. The current digest is:
 
 ```text
-61fa35025f2002a6df4cc505044f3048c5160d18a0d521f20713d48960985965
+b9ce7369cf3d2f1476390b8f1e823bf33d10268b1b0112cf55197ce4fff18559
 ```
 
 Families included:
@@ -30,7 +30,7 @@ Exact distances are recorded only for standard families with theorem-backed cert
 
 ## Split isolation
 
-Train/validation/test isolation is enforced by construction and validation. Row-space hashes and group/base-group IDs must not cross splits. Equivalent matrices produced by row operations or repeated base objects are rejected by row-space hash checks.
+Train/validation/test isolation is enforced by construction and validation. Row-space hashes and group/base-group IDs must not cross splits. Equivalent matrices produced by row operations or repeated base objects are rejected by row-space hash checks; coordinate permutations are not claimed to be detected by row-space hashes. A separate construction-lineage identifier is also enforced across splits.
 
 ## References
 
