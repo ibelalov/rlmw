@@ -43,7 +43,7 @@ jobs:
 
       - name: Research corpus validation
         run: |
-          python -m py_compile rlmw_research_corpus.py
+          python -m py_compile rlmw_research_corpus.py rlmw_research_corpus_audit.py test_rlmw_research_corpus_audit.py
           python -m json.tool h_native_research_v1_manifest.json >/tmp/h_native_research_v1_manifest.pretty.json
           python rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --smoke --print-summary
           python rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
@@ -51,6 +51,14 @@ jobs:
           python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --smoke --print-summary
           python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
           python -O rlmw_research_corpus.py --self-test --print-summary
+          python rlmw_research_corpus_audit.py self-test
+          python -m unittest -v test_rlmw_research_corpus_audit.py
+          python -O rlmw_research_corpus_audit.py self-test
+          python -O -m unittest -v test_rlmw_research_corpus_audit.py
+          mkdir -p /tmp/rlmw_research_corpus_audit
+          python rlmw_research_corpus_audit.py audit --max-weight 6 --output-dir /tmp/rlmw_research_corpus_audit
+          python rlmw_research_corpus_audit.py validate /tmp/rlmw_research_corpus_audit/rlmw_research_corpus_audit.jsonl
+          python rlmw_research_corpus_audit.py validate /tmp/rlmw_research_corpus_audit/rlmw_research_corpus_audit.jsonl --replay-exclusion
 
       - name: Research baseline contracts
         run: |
@@ -208,3 +216,8 @@ jobs:
           name: rlmw-colab-evidence
           path: /tmp/rlmw_evidence/*.zip
           if-no-files-found: error
+
+      - name: Notebook cleanliness and whitespace
+        run: |
+          git diff --check
+          git diff --exit-code -- rlmw.ipynb

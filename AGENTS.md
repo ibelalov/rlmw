@@ -136,6 +136,10 @@ Exact enumeration accounting is intentionally explicit: Gray/kernel replay count
 
 Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOLD_WITNESS` proves only that some nonzero codeword has weight at most `W`; `CERTIFIED_NO_THRESHOLD_WITNESS` requires complete exact coverage or another explicit exact proof.  CP-SAT feasibility statuses are therefore treated as threshold evidence only and are never labelled as minimum-distance certificates.
 
+## Research corpus audit quarantine
+
+`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. The next milestone is a separately reviewed `h-native-research-v2` design using coordinate-independent deterministic randomness and preregistered calibration.
+
 ## Research baseline protocol v1
 
 `rlmw_research_baselines.py` is intentionally standalone and is bound only to `h-native-research-v1`; do not reuse the Section 25 CI result registry for research-corpus records. Algorithms receive the allowlisted public solver payload only. Evaluator labels may be attached only after the run.

@@ -26,3 +26,6 @@ rlmw_colab_evidence_*.zip
 
 # Generated research-baseline records
 rlmw_research_baseline_results.jsonl
+
+# Generated research-corpus audit records
+rlmw_research_corpus_audit.jsonl
