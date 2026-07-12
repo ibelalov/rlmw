@@ -87,11 +87,13 @@ jobs:
           nb = json.load(open('rlmw.ipynb'))
           cell = next(''.join(c.get('source', [])) for c in nb['cells'] if c.get('cell_type') == 'code' and 'load_research_corpus_dependencies' in ''.join(c.get('source', [])))
           isolated = pathlib.Path(tempfile.mkdtemp(prefix='rlmw_isolated_source_'))
+          os.environ.pop('RLMW_RESEARCH_CORPUS_REF', None)
           os.environ['RLMW_RESEARCH_CORPUS_BASE_URL'] = pathlib.Path.cwd().as_uri()
           g = {'SOURCE_ROOT': isolated, 'SMOKE': True, 'os': os, 'json': json}
           exec(compile(cell, 'rlmw.ipynb::research_loader_isolated', 'exec'), g)
           summary = g['_research_summary']
           assert summary['selected_cases'] == 9 and summary['total_cases'] == 23, summary
+          assert g['RLMW_RESEARCH_PINNED_REF'] == '68742bf8ee9a83179478b0080366c0dda345a26c', g['RLMW_RESEARCH_PINNED_REF']
           assert g['_research_load']['load_mode'] == 'fetched', g['_research_load']
           print(summary)
           PY
