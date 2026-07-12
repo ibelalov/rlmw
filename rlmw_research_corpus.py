@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 VERSION = "h-native-research-v1"
+FROZEN_MANIFEST_SHA256 = "b9ce7369cf3d2f1476390b8f1e823bf33d10268b1b0112cf55197ce4fff18559"
 MAX_SMOKE_CASES = 9
 SPLITS = ("train", "validation", "test")
 SOLVER_KEYS = ("protocol_version", "manifest_sha256", "case_id", "H_rows", "H_sha256", "W", "budget_run")
@@ -31,6 +32,10 @@ def canonical_json_bytes(obj: Any) -> bytes:
 
 def sha(obj: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(obj)).hexdigest()
+
+
+def is_sha256_hex(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(ch in "0123456789abcdef" for ch in value)
 
 
 def rows_to_mat(rows: list[str]) -> list[list[int]]:
@@ -243,89 +248,157 @@ def solver_payload(manifest: dict, case_id: str, budget_run: dict | None = None)
     return {"protocol_version": manifest["protocol_version"], "manifest_sha256": manifest["manifest_sha256"], "case_id": c["case_id"], "H_rows": c["H_rows"], "H_sha256": c["raw_H_sha256"], "W": c["threshold"]["W"], "budget_run": budget_run or {"profile":"smoke","seed":0}}
 
 
-def validate_manifest(manifest: dict, *, smoke_only: bool=False) -> dict:
+def _validate_exact_case(c: dict) -> None:
+    """Run matrix-derived and family-certificate checks for one selected case."""
+    rows=c["H_rows"]; M=rows_to_mat(rows); n=len(rows[0]); rank=gf2_rank(M)
+    require(c["n"]==n and c["rank"]==rank and c["k"]==n-rank and n > 12, "dimension/rank invalid or not beyond tiny oracle")
+    require(c["raw_H_sha256"] == sha({"H_rows": rows}), "raw H hash mismatch")
+    require(c["rowspace_sha256"] == sha({"rref_rows": rref_rows(rows)}), "rowspace hash mismatch")
+    lab=c["label"]
+    if lab["kind"] == "certified_distance" and c["family"] == "reed_muller_rm1_control":
+        chk = rm1_control_check(c["construction"]["m"])
+        require(chk["minimum_distance"] == lab["distance"], "RM independent distance check mismatch")
+
+
+def _validate_manifest_core(manifest: dict, *, smoke_only: bool, expected_manifest_sha256: str) -> dict:
+    """Validate one expected manifest, with exact matrix work limited by ``smoke_only``."""
+    require(isinstance(smoke_only, bool), "smoke_only must be boolean")
+    require(is_sha256_hex(expected_manifest_sha256), "invalid expected manifest digest")
+    require(isinstance(manifest, dict), "manifest must be an object")
     require(manifest.get("protocol_version") == VERSION, "wrong protocol_version")
-    got=manifest.get("manifest_sha256"); require(isinstance(got,str) and len(got)==64, "missing manifest digest")
+    got=manifest.get("manifest_sha256"); require(is_sha256_hex(got), "missing manifest digest")
     require(got == sha({k:v for k,v in manifest.items() if k != "manifest_sha256"}), "manifest digest mismatch")
+    require(got == expected_manifest_sha256, "unexpected frozen manifest digest")
+    cases=manifest.get("cases"); require(isinstance(cases,list) and cases, "cases must be a nonempty list")
     selected_cases=0
+    exact_matrix_checked_case_ids=[]
     seen_ids=set(); seen_rowspace={s:set() for s in SPLITS}; lineages={s:set() for s in SPLITS}; groups={s:set() for s in SPLITS}; counts={s:0 for s in SPLITS}; smoke=0
-    for c in manifest["cases"]:
-        require(c["case_id"] not in seen_ids, "duplicate case_id"); seen_ids.add(c["case_id"])
-        require(c["split"] in SPLITS, "bad split"); counts[c["split"]]+=1
-        rows=c["H_rows"]; M=rows_to_mat(rows); n=len(rows[0]); rank=gf2_rank(M)
-        require(c["n"]==n and c["rank"]==rank and c["k"]==n-rank and c["n"] > 12, "dimension/rank invalid or not beyond tiny oracle")
-        require(c["raw_H_sha256"] == sha({"H_rows": rows}), "raw H hash mismatch")
-        rh=sha({"rref_rows": rref_rows(rows)}); require(c["rowspace_sha256"] == rh, "rowspace hash mismatch")
-        require(c["group_id"] not in groups[c["split"]] and c["base_group_id"] not in groups[c["split"]], "duplicate group in split")
+    for c in cases:
+        require(isinstance(c,dict), "case must be an object")
+        case_id=c.get("case_id"); require(isinstance(case_id,str) and case_id and case_id not in seen_ids, "duplicate or invalid case_id"); seen_ids.add(case_id)
+        split=c.get("split"); require(split in SPLITS, "bad split"); counts[split]+=1
+        n=c.get("n"); rank=c.get("rank"); k=c.get("k")
+        require(isinstance(n,int) and not isinstance(n,bool) and n > 12, "invalid declared length")
+        require(isinstance(rank,int) and not isinstance(rank,bool) and 0 <= rank <= n, "invalid declared rank")
+        require(isinstance(k,int) and not isinstance(k,bool) and k == n-rank, "invalid declared dimension")
+        raw_hash=c.get("raw_H_sha256"); rowspace_hash=c.get("rowspace_sha256")
+        require(is_sha256_hex(raw_hash), "invalid declared raw H hash")
+        require(is_sha256_hex(rowspace_hash), "invalid declared rowspace hash")
+        group_id=c.get("group_id"); base_group_id=c.get("base_group_id")
+        require(isinstance(group_id,str) and group_id and isinstance(base_group_id,str) and base_group_id, "missing group identifier")
+        require(group_id not in groups[split] and base_group_id not in groups[split], "duplicate group in split")
         lineage=c.get("construction_lineage_id"); require(isinstance(lineage,str) and lineage, "missing construction lineage")
-        require(lineage not in lineages[c["split"]], "duplicate construction lineage in split")
-        lineages[c["split"]].add(lineage)
-        groups[c["split"]].update([c["group_id"], c["base_group_id"]]); seen_rowspace[c["split"]].add(rh)
+        require(lineage not in lineages[split], "duplicate construction lineage in split")
+        lineages[split].add(lineage)
+        groups[split].update([group_id, base_group_id]); seen_rowspace[split].add(rowspace_hash)
         subset=c.get("subset")
         require(isinstance(subset, list) and subset == list(dict.fromkeys(subset)) and all(x in {"smoke", "full"} for x in subset) and "full" in subset and subset in (["full"], ["smoke", "full"]), "subset must be unique ordered smoke/full tags and include full")
-        W=c["threshold"]["W"]; require(isinstance(W,int) and not isinstance(W,bool) and 0 < W <= n, "bad threshold")
-        lab=c["label"]; require(lab["kind"] in {"certified_distance","unknown_distance_threshold_challenge"}, "bad label kind")
+        threshold=c.get("threshold"); require(isinstance(threshold,dict) and threshold.get("relation") == "at_most", "bad threshold relation")
+        W=threshold.get("W"); require(isinstance(W,int) and not isinstance(W,bool) and 0 < W <= n, "bad threshold")
+        lab=c.get("label"); require(isinstance(lab,dict) and lab.get("kind") in {"certified_distance","unknown_distance_threshold_challenge"}, "bad label kind")
         if lab["kind"] == "certified_distance":
-            require(isinstance(lab.get("distance"),int) and lab["distance"] > 0, "bad certified label")
-            if (not smoke_only) or ("smoke" in c["subset"]):
-                if c["family"] == "reed_muller_rm1_control":
-                    chk = rm1_control_check(c["construction"]["m"])
-                    require(chk["minimum_distance"] == lab["distance"], "RM independent distance check mismatch")
-        else: require(lab.get("distance") is None and lab.get("known_lower_bound",0) >= 1 and lab.get("upper_bound_witness_exposed") is False, "unknown label leaks or implies exact distance")
-        p=solver_payload(manifest,c["case_id"]); require(tuple(p.keys()) == SOLVER_KEYS and not (set(p) & EVALUATOR_ONLY_KEYS), "solver payload leakage")
-        if "smoke" in c["subset"]: smoke += 1
-        if (not smoke_only) or ("smoke" in c["subset"]): selected_cases += 1
+            distance=lab.get("distance"); require(isinstance(distance,int) and not isinstance(distance,bool) and distance > 0, "bad certified label")
+        else:
+            lower=lab.get("known_lower_bound")
+            require(lab.get("distance") is None and isinstance(lower,int) and not isinstance(lower,bool) and lower >= 1 and lab.get("upper_bound_witness_exposed") is False, "unknown label leaks or implies exact distance")
+        p=solver_payload(manifest,case_id); require(tuple(p.keys()) == SOLVER_KEYS and not (set(p) & EVALUATOR_ONLY_KEYS), "solver payload leakage")
+        is_smoke = "smoke" in subset
+        if is_smoke: smoke += 1
+        if (not smoke_only) or is_smoke:
+            _validate_exact_case(c)
+            exact_matrix_checked_case_ids.append(case_id)
+            selected_cases += 1
     for a,b in itertools.combinations(SPLITS,2):
         require(not (seen_rowspace[a] & seen_rowspace[b]), f"rowspace leakage across {a}/{b}")
         require(not (groups[a] & groups[b]), f"group leakage across {a}/{b}")
         require(not (lineages[a] & lineages[b]), f"construction lineage leakage across {a}/{b}")
     require(all(counts[s] > 0 for s in SPLITS), "empty split")
     require(0 < smoke <= MAX_SMOKE_CASES, "smoke subset must be bounded")
-    require(build_manifest()["manifest_sha256"] == got, "deterministic regeneration mismatch")
-    return {"selected_cases":selected_cases, "total_cases":len(manifest["cases"]), "smoke_cases":smoke, "splits":counts, "digest":got, "smoke_only": bool(smoke_only)}
+    if not smoke_only:
+        require(build_manifest()["manifest_sha256"] == got, "deterministic regeneration mismatch")
+    return {"selected_cases":selected_cases, "exact_matrix_checked_case_ids":exact_matrix_checked_case_ids, "total_cases":len(cases), "smoke_cases":smoke, "splits":counts, "digest":got, "smoke_only":smoke_only}
+
+
+def validate_manifest(manifest: dict, *, smoke_only: bool=False) -> dict:
+    """Validate the frozen v1 manifest; smoke mode limits matrix-derived work to smoke cases."""
+    return _validate_manifest_core(manifest, smoke_only=smoke_only, expected_manifest_sha256=FROZEN_MANIFEST_SHA256)
 
 
 
 def run_regression_tests() -> dict:
     manifest = build_manifest()
+    require(manifest["manifest_sha256"] == FROZEN_MANIFEST_SHA256, "generator no longer matches frozen manifest digest")
     smoke_summary = validate_manifest(json.loads(json.dumps(manifest)), smoke_only=True)
     full_summary = validate_manifest(json.loads(json.dumps(manifest)), smoke_only=False)
+    smoke_ids = [c["case_id"] for c in manifest["cases"] if "smoke" in c["subset"]]
+    full_ids = [c["case_id"] for c in manifest["cases"]]
     require(smoke_summary["selected_cases"] == MAX_SMOKE_CASES, "smoke validation selected wrong case count")
+    require(smoke_summary["exact_matrix_checked_case_ids"] == smoke_ids, "smoke validation checked a non-smoke matrix or missed a smoke matrix")
     require(full_summary["selected_cases"] == full_summary["total_cases"], "full validation did not select all cases")
+    require(full_summary["exact_matrix_checked_case_ids"] == full_ids, "full validation did not check every matrix")
     rm_checks = [rm1_control_check(m) for m in (5, 6, 7)]
 
-    def expect_failure(label: str, fn) -> None:
+    def expect_failure(label: str, fn, message_fragment: str | None = None) -> None:
         try:
             fn()
-        except ValueError:
+        except ValueError as exc:
+            if message_fragment is not None:
+                require(message_fragment in str(exc), f"negative regression failed for the wrong reason: {label}: {exc}")
             return
         fail(f"negative regression unexpectedly passed: {label}")
 
+    def resign(obj: dict) -> str:
+        obj["manifest_sha256"] = sha({k:v for k,v in obj.items() if k != "manifest_sha256"})
+        return obj["manifest_sha256"]
+
     bad = json.loads(json.dumps(manifest)); bad["cases"][0]["subset"] = ["full", "full"]; bad["manifest_sha256"] = sha({k:v for k,v in bad.items() if k != "manifest_sha256"})
-    expect_failure("duplicate subset values", lambda: validate_manifest(bad, smoke_only=True))
+    expect_failure("duplicate subset values", lambda: _validate_manifest_core(bad, smoke_only=True, expected_manifest_sha256=bad["manifest_sha256"]), "subset must be unique")
     bad = json.loads(json.dumps(manifest)); bad["cases"][0]["subset"] = ["smoke"]; bad["manifest_sha256"] = sha({k:v for k,v in bad.items() if k != "manifest_sha256"})
-    expect_failure("subset missing full", lambda: validate_manifest(bad, smoke_only=True))
+    expect_failure("subset missing full", lambda: _validate_manifest_core(bad, smoke_only=True, expected_manifest_sha256=bad["manifest_sha256"]), "subset must be unique")
     bad = json.loads(json.dumps(manifest)); bad["cases"][0]["subset"] = ["full", "smoke"]; bad["manifest_sha256"] = sha({k:v for k,v in bad.items() if k != "manifest_sha256"})
-    expect_failure("misordered subset", lambda: validate_manifest(bad, smoke_only=True))
-    bad = json.loads(json.dumps(manifest)); bad["cases"][0]["construction_lineage_id"] = bad["cases"][8]["construction_lineage_id"]; bad["manifest_sha256"] = sha({k:v for k,v in bad.items() if k != "manifest_sha256"})
-    expect_failure("cross-split construction lineage reuse", lambda: validate_manifest(bad, smoke_only=True))
+    expect_failure("misordered subset", lambda: _validate_manifest_core(bad, smoke_only=True, expected_manifest_sha256=bad["manifest_sha256"]), "subset must be unique")
+    bad = json.loads(json.dumps(manifest)); bad["cases"][4]["construction_lineage_id"] = bad["cases"][0]["construction_lineage_id"]; resign(bad)
+    expect_failure("non-smoke cross-split construction lineage reuse", lambda: _validate_manifest_core(bad, smoke_only=True, expected_manifest_sha256=bad["manifest_sha256"]), "construction lineage leakage across")
+    bad = json.loads(json.dumps(manifest)); bad["cases"][4]["rowspace_sha256"] = bad["cases"][0]["rowspace_sha256"]; resign(bad)
+    expect_failure("non-smoke declared rowspace reuse", lambda: _validate_manifest_core(bad, smoke_only=True, expected_manifest_sha256=bad["manifest_sha256"]), "rowspace leakage across")
+
+    # A private, explicitly rebound smoke check skips matrix-derived work for a
+    # non-smoke case.  The public validator still rejects the modified full
+    # manifest via FROZEN_MANIFEST_SHA256, and full validation detects the bad H.
+    bad = json.loads(json.dumps(manifest))
+    row = bad["cases"][1]["H_rows"][0]
+    bad["cases"][1]["H_rows"][0] = ("1" if row[0] == "0" else "0") + row[1:]
+    resign(bad)
+    rebound_smoke = _validate_manifest_core(bad, smoke_only=True, expected_manifest_sha256=bad["manifest_sha256"])
+    require(rebound_smoke["exact_matrix_checked_case_ids"] == smoke_ids, "rebound smoke validation checked a non-smoke matrix")
+    expect_failure("public frozen digest binding", lambda: validate_manifest(bad, smoke_only=True), "unexpected frozen manifest digest")
+    expect_failure("full validation checks non-smoke H", lambda: _validate_manifest_core(bad, smoke_only=False, expected_manifest_sha256=bad["manifest_sha256"]), "raw H hash mismatch")
+
     bad = json.loads(json.dumps(manifest)); bad["cases"][0]["manifest_sha256"] = "not a case field"
-    expect_failure("manifest digest mismatch", lambda: validate_manifest(bad, smoke_only=True))
+    expect_failure("manifest digest mismatch", lambda: validate_manifest(bad, smoke_only=True), "manifest digest mismatch")
     return {"smoke": smoke_summary, "full": full_summary, "rm1_checks": rm_checks}
 
 def main(argv=None) -> int:
     ap=argparse.ArgumentParser(); ap.add_argument("--write", help="write canonical manifest JSON"); ap.add_argument("--validate", help="validate manifest JSON; use 'generated' for regenerated manifest"); ap.add_argument("--smoke", action="store_true"); ap.add_argument("--print-summary", action="store_true"); ap.add_argument("--self-test", action="store_true")
-    ns=ap.parse_args(argv); manifest=build_manifest()
+    ns=ap.parse_args(argv)
     if ns.self_test:
         summary = run_regression_tests()
         if ns.print_summary: print(json.dumps(summary, sort_keys=True))
         return 0
-    if ns.write: open(ns.write,"w",encoding="utf-8").write(json.dumps(manifest,indent=2,sort_keys=True)+"\n")
+    manifest = None
+    if ns.write:
+        manifest = build_manifest()
+        open(ns.write,"w",encoding="utf-8").write(json.dumps(manifest,indent=2,sort_keys=True)+"\n")
     if ns.validate:
-        manifest = manifest if ns.validate == "generated" else json.load(open(ns.validate,encoding="utf-8"))
+        if ns.validate == "generated":
+            if manifest is None: manifest = build_manifest()
+        else:
+            manifest = json.load(open(ns.validate,encoding="utf-8"))
         summary=validate_manifest(manifest, smoke_only=ns.smoke)
         if ns.print_summary: print(json.dumps(summary, sort_keys=True))
-    elif ns.print_summary: print(json.dumps(validate_manifest(manifest), sort_keys=True))
+    elif ns.print_summary:
+        if manifest is None: manifest = build_manifest()
+        print(json.dumps(validate_manifest(manifest), sort_keys=True))
     return 0
 
 if __name__ == "__main__": raise SystemExit(main())

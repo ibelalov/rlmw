@@ -52,6 +52,34 @@ jobs:
           python -O rlmw_research_corpus.py --validate h_native_research_v1_manifest.json --print-summary
           python -O rlmw_research_corpus.py --self-test --print-summary
 
+      - name: Research baseline contracts
+        run: |
+          python -m py_compile rlmw_research_baselines.py test_rlmw_research_baselines.py
+          python rlmw_research_baselines.py self-test --print-summary
+          python -m unittest -v test_rlmw_research_baselines.py
+          python rlmw_research_baselines.py list --profile smoke --json >/tmp/rlmw_research_baseline_plan.json
+          mkdir -p /tmp/rlmw_research_baseline_smoke
+          python rlmw_research_baselines.py run \
+            --profile smoke \
+            --output-dir /tmp/rlmw_research_baseline_smoke
+          python rlmw_research_baselines.py validate \
+            /tmp/rlmw_research_baseline_smoke/rlmw_research_baseline_results.jsonl \
+            --print-summary
+          mkdir -p /tmp/rlmw_research_baseline_cp_sat
+          python rlmw_research_baselines.py run \
+            --profile smoke \
+            --baseline cp_sat_threshold_reference_v1 \
+            --case-id hnrv1-c0001 \
+            --output-dir /tmp/rlmw_research_baseline_cp_sat
+          python rlmw_research_baselines.py validate \
+            /tmp/rlmw_research_baseline_cp_sat/rlmw_research_baseline_results.jsonl \
+            --print-summary
+
+      - name: Optimized research baseline contracts
+        run: |
+          python -O rlmw_research_baselines.py self-test --print-summary
+          python -O -m unittest -v test_rlmw_research_baselines.py
+
       - name: Isolated Colab-like research loader
         run: |
           python - <<'PY'

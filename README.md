@@ -53,6 +53,7 @@ Current notebook sections are:
 - **23.** Optional Colab evidence exporter
 - **24.** H-native binary-code interface and exact small-instance oracle
 - **25.** Frozen H-native benchmark protocol v1
+- **26.** Research-scale public-H corpus manifest v1
 
 ## Current empirical conclusions
 
@@ -135,15 +136,11 @@ The protocol includes 6 smoke tasks, all 15 full tasks, 2 smoke run specs, and 4
 
 ## Next milestone
 
-The next technical milestone is a genuinely research-scale H-native corpus using standard code families and independent larger ensembles; strong classical baselines follow after that corpus is reviewed.
+The current technical milestone is the reproducible classical-baseline evaluation layer for the frozen research corpus. Replicated research runs and controlled neural/RL comparisons follow only after its contracts and budgets are reviewed.
 
-## Executable artifact
+## Executable artifacts
 
-The single executable artifact is:
-
-- `rlmw.ipynb`
-
-Core logic should remain in this notebook unless explicitly requested otherwise.
+The primary interactive artifact is `rlmw.ipynb`. The explicitly requested standalone research tools are `rlmw_research_corpus.py` and `rlmw_research_baselines.py`; they provide reproducible manifest and baseline contracts used by CI and Colab. Neural and hybrid-search core logic remains in the notebook.
 
 ## Storage policy
 
@@ -166,3 +163,19 @@ b9ce7369cf3d2f1476390b8f1e823bf33d10268b1b0112cf55197ce4fff18559
 ```
 
 The corpus covers Hamming, extended Hamming, Reed--Muller RM(1, m) controls, sparse LDPC-style parity-check ensembles, and dense random full-rank parity-check ensembles. It is for corpus construction and validation only; it does not make benchmark-performance, neural-quality, or optimization claims.
+
+## Research baseline evaluation layer
+
+`rlmw_research_baselines.py` and `RESEARCH_BASELINES.md` define a separate baseline protocol for `h-native-research-v1`. The layer implements three solver-disabled baselines—uniform kernel sampling, fixed-weight coordinate-subset sampling, and a zero-syndrome Lee–Brickell information-set search—plus an explicitly selected CP-SAT threshold-feasibility reference in a separate solver-assisted stratum.
+
+The CLI can list a frozen run plan without executing it, run the smoke or full profile with pinned seed/repetition pairs, write canonical JSONL to a user-selected directory, independently validate stored records without rerunning search, and print stratum-separated summaries. Every stored incumbent is independently rechecked against the public `H`; incomplete search never becomes an infeasibility or minimum-distance claim.
+
+```bash
+python rlmw_research_baselines.py list --profile smoke
+python rlmw_research_baselines.py run --profile smoke --output-dir /tmp/rlmw-baseline-smoke
+python rlmw_research_baselines.py validate /tmp/rlmw-baseline-smoke/rlmw_research_baseline_results.jsonl --print-summary
+python rlmw_research_baselines.py self-test --print-summary
+python -O rlmw_research_baselines.py self-test --print-summary
+```
+
+Generated result JSONL files are not source artifacts and must not be committed. This layer establishes infrastructure and smoke correctness only; it contains no solver-superiority or neural-quality conclusion.
