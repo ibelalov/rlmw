@@ -62,7 +62,7 @@ jobs:
           python rlmw_research_corpus_audit.py validate /tmp/rlmw_research_corpus_audit_a/rlmw_research_corpus_audit.jsonl
           python rlmw_research_corpus_audit.py validate /tmp/rlmw_research_corpus_audit_a/rlmw_research_corpus_audit.jsonl --replay-exclusion
           python rlmw_research_corpus_audit.py summary /tmp/rlmw_research_corpus_audit_a/rlmw_research_corpus_audit.jsonl
-          test "$(sha256sum h_native_research_v1_manifest.json | cut -d' ' -f1)" = "b9ce7369cf3d2f1476390b8f1e823bf33d10268b1b0112cf55197ce4fff18559"
+          test "$(sha256sum h_native_research_v1_manifest.json | cut -d' ' -f1)" = "909feccf42fa7d0446f7e67f874fc2535806f33273eb0cfc71b8b15c7b9ab351"
 
       - name: Research baseline contracts
         run: |

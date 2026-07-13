@@ -7,7 +7,7 @@ distance algorithm and not a benchmark-performance claim.
 """
 from __future__ import annotations
 
-import argparse, hashlib, itertools, json, math, os, sys, tempfile
+import argparse, hashlib, itertools, json, math, os, sys
 from typing import Any
 
 import rlmw_research_corpus as corpus
@@ -89,9 +89,10 @@ def gf2_rank_rows(rows:list[str]) -> int:
         vals=[v ^ pivot if ((v>>bit)&1) else v for v in vals if (v ^ pivot if ((v>>bit)&1) else v)]
     return rank
 
-def preflight(n:int, r:int, max_weight:int, rank:int|None=None) -> dict:
+def preflight_for_rows(rows:list[str], max_weight:int) -> dict:
     max_weight=_strict_int(max_weight,"max_weight",0,AUDIT_CAP)
-    rank = r if rank is None else _strict_int(rank,"rank",0,r)
+    req(isinstance(rows,list) and rows, "H rows required")
+    r=len(rows); n=len(rows[0]); rank=gf2_rank_rows(rows)
     weights=[]
     for w in range(1,max_weight+1):
         a=w//2; b=w-a
@@ -113,27 +114,27 @@ def ordered_split_search(rows:list[str], max_weight:int=6, interrupt_after_subse
         for R in itertools.combinations(range(n), b):
             if interrupt_after_subsets is not None and processed >= interrupt_after_subsets:
                 per.append(_weight_record(w,a,b,n,rc,lc,len(mp),"INTERRUPTED"))
-                return {"status":"RESOURCE_LIMIT","last_completed_weight":last,"interrupted_weight":w,"certified_bound":last+1,"per_weight":per,"failure":"interrupted"}
+                return {"status":"RESOURCE_LIMIT","last_excluded_weight":last,"interrupted_weight":w,"certified_bound":last+1,"per_weight":per,"failure":"interrupted"}
             s=syndrome(cols,R); old=mp.get(s)
             if representative_better(R, old): mp[s]=R
             rc+=1; processed+=1
         for L in itertools.combinations(range(n), a):
             if interrupt_after_subsets is not None and processed >= interrupt_after_subsets:
                 per.append(_weight_record(w,a,b,n,rc,lc,len(mp),"INTERRUPTED"))
-                return {"status":"RESOURCE_LIMIT","last_completed_weight":last,"interrupted_weight":w,"certified_bound":last+1,"per_weight":per,"failure":"interrupted"}
+                return {"status":"RESOURCE_LIMIT","last_excluded_weight":last,"interrupted_weight":w,"certified_bound":last+1,"per_weight":per,"failure":"interrupted"}
             R=mp.get(syndrome(cols,L)); lc+=1; processed+=1
             if R is not None and (a==0 or min(R) > max(L)):
                 supp=sorted((*L,*R)); verify_support(rows,supp)
                 per.append(_weight_record(w,a,b,n,rc,lc,len(mp),"WITNESS_FOUND"))
-                return {"status":"CERTIFIED_EXACT_DISTANCE","last_completed_weight":w,"certified_bound":w,"witness_support":supp,"witness_weight":w,"witness_sha256":sha({"support":supp}),"per_weight":per}
+                return {"status":"CERTIFIED_EXACT_DISTANCE","last_excluded_weight":w-1,"certified_bound":w,"witness_support":supp,"witness_weight":w,"witness_sha256":sha({"support":supp}),"per_weight":per}
         last=w
         per.append(_weight_record(w,a,b,n,rc,lc,len(mp),"EXHAUSTED_NO_WITNESS"))
-    return {"status":"CERTIFIED_LOWER_BOUND","last_completed_weight":max_weight,"certified_bound":max_weight+1,"per_weight":per}
+    return {"status":"CERTIFIED_LOWER_BOUND","last_excluded_weight":max_weight,"certified_bound":max_weight+1,"per_weight":per}
 
 def audit_case(c:dict, max_weight:int=6, interrupt_after_subsets:int|None=None) -> dict:
     rows=c["H_rows"]; h=corpus.sha({"H_rows":rows}); cfg={"algorithm":AUDIT_ALGORITHM,"max_weight":max_weight,"subset_visit_limit":interrupt_after_subsets}
     res=ordered_split_search(rows,max_weight,interrupt_after_subsets)
-    rec={"audit_protocol_version":AUDIT_PROTOCOL_VERSION,"corpus_protocol_version":corpus.VERSION,"manifest_sha256":corpus.FROZEN_MANIFEST_SHA256,"case_id":c["case_id"],"raw_H_sha256":h,"audit_algorithm":AUDIT_ALGORITHM,"audit_config_sha256":sha(cfg),"requested_cap":max_weight,"audit_config":cfg,"preflight":preflight(len(rows[0]),len(rows),max_weight,gf2_rank_rows(rows)), **res}
+    rec={"audit_protocol_version":AUDIT_PROTOCOL_VERSION,"corpus_protocol_version":corpus.VERSION,"manifest_sha256":corpus.FROZEN_MANIFEST_SHA256,"case_id":c["case_id"],"raw_H_sha256":h,"audit_algorithm":AUDIT_ALGORITHM,"audit_config_sha256":sha(cfg),"requested_cap":max_weight,"audit_config":cfg,"preflight":preflight_for_rows(rows,max_weight), **res}
     rec["record_sha256"] = sha({k:v for k,v in rec.items() if k != "record_sha256"})
     return rec
 
@@ -151,7 +152,7 @@ def _validate_per_weight(per:list, cap:int, status:str, n:int)->None:
         er=_strict_int(wr["expected_right_subsets"],"expected_right_subsets",0,None); el=_strict_int(wr["expected_left_subsets"],"expected_left_subsets",0,None)
         req(er==math.comb(n,b) and el==math.comb(n,a),"bad expected subset count")
         rr=_strict_int(wr["examined_right_subsets"],"examined_right_subsets",0,er); ll=_strict_int(wr["examined_left_subsets"],"examined_left_subsets",0,el)
-        _strict_int(wr["syndrome_map_size"],"syndrome_map_size",0,er)
+        _strict_int(wr["syndrome_map_size"],"syndrome_map_size",0,rr)
         req(wr["outcome"] in {"EXHAUSTED_NO_WITNESS","WITNESS_FOUND","INTERRUPTED"},"bad outcome")
         if wr["outcome"]=="EXHAUSTED_NO_WITNESS": req(rr==er and ll==el,"exhausted counters incomplete")
         if wr["outcome"]=="WITNESS_FOUND": req(rr==er and 1<=ll<=el,"witness counters invalid")
@@ -178,27 +179,33 @@ def validate_record(rec:dict, m:dict, replay_exclusion:bool=False) -> None:
     req(set(cfg)=={"algorithm","max_weight","subset_visit_limit"}, "config keys mismatch")
     req(rec.get("audit_config_sha256") == sha(cfg), "config hash mismatch")
     st=rec.get("status"); req(st in {"CERTIFIED_EXACT_DISTANCE","CERTIFIED_LOWER_BOUND","RESOURCE_LIMIT"}, "bad status")
-    base={"audit_protocol_version","corpus_protocol_version","manifest_sha256","case_id","raw_H_sha256","audit_algorithm","audit_config_sha256","audit_config","preflight","requested_cap","status","last_completed_weight","certified_bound","per_weight","record_sha256"}
+    base={"audit_protocol_version","corpus_protocol_version","manifest_sha256","case_id","raw_H_sha256","audit_algorithm","audit_config_sha256","audit_config","preflight","requested_cap","status","last_excluded_weight","certified_bound","per_weight","record_sha256"}
     if st=="CERTIFIED_EXACT_DISTANCE": _expect_keys(rec,base|{"witness_support","witness_weight","witness_sha256"})
     elif st=="CERTIFIED_LOWER_BOUND": _expect_keys(rec,base)
     else: _expect_keys(rec,base|{"interrupted_weight","failure"})
     rows=c["H_rows"]; n=len(rows[0])
-    req(rec["preflight"]==preflight(n,len(rows),cap,gf2_rank_rows(rows)),"preflight mismatch")
+    req(rec["preflight"]==preflight_for_rows(rows,cap),"preflight mismatch")
     _validate_per_weight(rec["per_weight"],cap,st,n)
-    last=_strict_int(rec["last_completed_weight"],"last_completed_weight",0,cap)
+    last=_strict_int(rec["last_excluded_weight"],"last_excluded_weight",0,cap)
+    total_examined=sum(wr["examined_right_subsets"]+wr["examined_left_subsets"] for wr in rec["per_weight"])
     cb=_strict_int(rec["certified_bound"],"certified_bound",1,AUDIT_CAP+1)
     if st=="CERTIFIED_EXACT_DISTANCE":
         supp=rec["witness_support"]; verify_support(rows, supp)
         ww=_strict_int(rec["witness_weight"],"witness_weight",1,AUDIT_CAP)
-        req(ww==len(supp)==cb==rec["per_weight"][-1]["weight"]==last,"witness/bound mismatch")
+        req(ww==len(supp)==cb==rec["per_weight"][-1]["weight"] and last==ww-1,"witness/bound mismatch")
         req(rec["witness_sha256"]==sha({"support":supp}),"witness hash mismatch")
-    elif st=="CERTIFIED_LOWER_BOUND": req(last==cap and cb==cap+1,"lower bound mismatch")
+    elif st=="CERTIFIED_LOWER_BOUND":
+        req(last==cap and cb==cap+1,"lower bound mismatch")
     else:
+        req(lim is not None,"resource limit requires subset_visit_limit")
+        req(total_examined==lim,"resource examined count must equal subset_visit_limit")
         req(rec["failure"]=="interrupted","bad failure")
         iw=_strict_int(rec["interrupted_weight"],"interrupted_weight",1,cap); req(iw==len(rec["per_weight"]) and last==iw-1 and cb==last+1,"resource bound mismatch")
+    if lim is not None and st != "RESOURCE_LIMIT":
+        req(total_examined <= lim,"completed record exceeds subset_visit_limit")
     if replay_exclusion:
         rr=audit_case(c, cap, cfg.get("subset_visit_limit"))
-        for k in ("status","last_completed_weight","certified_bound","witness_support","witness_weight","witness_sha256","per_weight"):
+        for k in ("status","last_excluded_weight","certified_bound","witness_support","witness_weight","witness_sha256","per_weight"):
             req(rec.get(k)==rr.get(k), f"replay mismatch {k}")
 
 def _no_dupe_object_pairs(pairs):
@@ -225,14 +232,15 @@ def read_canonical_jsonl(path:str, replay_exclusion:bool=False)->list[dict]:
     req(tuple(sorted(seen))==UNKNOWN_CASE_IDS,"missing or unexpected case IDs")
     return recs
 
-def dense_xorshift_relation_holds(n:int,r:int,seed:int)->bool:
+def dense_xorshift_relation_holds(n:int,r:int,seed:int)->dict:
+    if n <= r+64 or r+7 >= n:
+        return {"applicable":False,"holds":None,"reason":"requires columns r, r+7, and r+64"}
     rows=corpus.dense_random_H(n,r,seed); cols,_,_=parse_h_rows(rows)
-    if n <= r+64 or r+7 >= n: return True
-    return cols[r] ^ cols[r+7] ^ cols[r+64] == 0
+    return {"applicable":True,"holds":cols[r] ^ cols[r+7] ^ cols[r+64] == 0}
 
 def self_test() -> None:
-    for n,r in [(80,8),(96,48),(144,72)]:
-        for seed in [1,7707,9909,3030]: req(dense_xorshift_relation_holds(n,r,seed), "xorshift relation failed")
+    for n,r in [(128,48),(144,72),(160,80)]:
+        for seed in [1,7707,9909,3030]: req(dense_xorshift_relation_holds(n,r,seed)["holds"], "xorshift relation failed")
     m=load_manifest(); cm=case_map(m)
     for cid,(st,w,supp) in EXPECTED_FINDINGS.items():
         rec=audit_case(cm[cid],6); req(rec["status"]==st and rec.get("witness_weight")==w and rec.get("witness_support")==supp, f"finding mismatch {cid}")
@@ -264,5 +272,5 @@ def main(argv=None)->int:
     return 2
 if __name__ == "__main__":
     try: sys.exit(main())
-    except ValueError as e:
+    except (ValueError, OSError) as e:
         print(str(e), file=sys.stderr); sys.exit(1)

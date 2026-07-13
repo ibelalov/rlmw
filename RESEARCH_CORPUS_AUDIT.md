@@ -16,7 +16,7 @@ For each weight, v2 stores `weight`, split sizes `a` and `b`, expected and exami
 - `WITNESS_FOUND`: all right subsets and the recorded prefix of left subsets were evaluated until a verified witness was found.
 - `INTERRUPTED`: a subset-visit resource limit stopped before the next subset was evaluated; the rejected subset is not counted.
 
-`CERTIFIED_EXACT_DISTANCE` requires every smaller weight to be `EXHAUSTED_NO_WITNESS`, a terminal `WITNESS_FOUND`, matching `witness_weight`, `certified_bound`, support length, and terminal weight, plus an independently verified nonzero zero-syndrome support. `CERTIFIED_LOWER_BOUND` requires every weight through the requested cap to be exhausted and reports `requested_cap + 1`. `RESOURCE_LIMIT` identifies the interrupted weight and bases its lower bound only on earlier consecutive exhausted weights.
+`CERTIFIED_EXACT_DISTANCE` requires every smaller weight to be `EXHAUSTED_NO_WITNESS`, a terminal `WITNESS_FOUND`, matching `witness_weight`, `certified_bound`, support length, and terminal weight, plus an independently verified nonzero zero-syndrome support; `last_excluded_weight` is therefore `witness_weight - 1`. `CERTIFIED_LOWER_BOUND` requires every weight through the requested cap to be exhausted, sets `last_excluded_weight = requested_cap`, and reports `requested_cap + 1`. `RESOURCE_LIMIT` requires a non-null `subset_visit_limit`, requires the sum of examined right and left subsets to equal that limit, identifies the interrupted weight, and bases `last_excluded_weight` and the lower bound only on earlier consecutive exhausted weights.
 
 ## Canonical JSONL and validation levels
 
@@ -43,7 +43,45 @@ Malformed CLI use is handled by `argparse`; validation failures return nonzero s
 
 ## Independently reproduced v1 findings
 
-Full replay through weight 6 reproduces exact witnesses for `hnrv1-c0012`, `hnrv1-c0013`, `hnrv1-c0020`, `hnrv1-c0022`, and `hnrv1-c0023`, and lower bounds `d>=7` for `hnrv1-c0014`, `hnrv1-c0015`, `hnrv1-c0016`, `hnrv1-c0017`, `hnrv1-c0018`, `hnrv1-c0019`, and `hnrv1-c0021`.
+Through weight 6, the audit reproduces:
+
+| Case | Certificate | Witness |
+|---|---:|---|
+| `hnrv1-c0012` | exact `d=6` | `[4,14,34,62,78,80]` |
+| `hnrv1-c0013` | exact `d=5` | `[26,37,82,97,105]` |
+| `hnrv1-c0020` | exact `d=3` | `[72,79,136]` |
+| `hnrv1-c0022` | exact `d=3` | `[72,79,136]` |
+| `hnrv1-c0023` | exact `d=3` | `[80,87,144]` |
+| `hnrv1-c0014` | lower bound | `d>=7` |
+| `hnrv1-c0015` | lower bound | `d>=7` |
+| `hnrv1-c0016` | lower bound | `d>=7` |
+| `hnrv1-c0017` | lower bound | `d>=7` |
+| `hnrv1-c0018` | lower bound | `d>=7` |
+| `hnrv1-c0019` | lower bound | `d>=7` |
+| `hnrv1-c0021` | lower bound | `d>=7` |
+
+
+## Dense xorshift artifact
+
+`dense_random_H` constructs `H=[I_r|P]` from consecutive outputs of `xorshift64`. For the generator step
+
+```text
+x ^= x << 13; x ^= x >> 7; x ^= x << 17
+```
+
+the low output bit after the final left shift is unchanged by that final shift. The first left shift also cannot affect bit 0, so after the middle right shift:
+
+```text
+bit_0(next) = bit_0(current_after_left13) XOR bit_7(current_after_left13).
+```
+
+The first left shift cannot affect bit 7 from lower negative positions, so this gives the documented linear relation between the next block's bit 0 and the previous block's bits 0 and 7. Since `dense_random_H` writes a 64-bit block across columns `r..r+63` and the next block at `r+64..`, whenever all three referenced columns exist:
+
+```text
+H[:,r] XOR H[:,r+7] XOR H[:,r+64] = 0.
+```
+
+This construction artifact explains the weight-3 circuits in `hnrv1-c0020`, `hnrv1-c0022`, and `hnrv1-c0023`. Tests now require applicable dimensions for the relation and return an explicit not-applicable result rather than a vacuous success when the referenced columns do not exist.
 
 ## Quarantine and roadmap
 
