@@ -136,7 +136,7 @@ The protocol includes 6 smoke tasks, all 15 full tasks, 2 smoke run specs, and 4
 
 ## Next milestone
 
-This PR specifies the `h-native-research-v2` construction and calibration protocol design. No v2 generator, manifest, thresholds, case records, calibration results, replicated experiments, or neural/RL evaluation exist yet. After this PR is reviewed and merged, the next PR implements candidate-generation and validation tooling only; replicated experiments and neural/RL evaluation remain deferred until v2 is reviewed, calibrated, and frozen.
+This PR specifies the [`h-native-research-v2` construction and calibration protocol design](RESEARCH_CORPUS_V2_DESIGN.md). No v2 generator, manifest, thresholds, case records, calibration results, replicated experiments, or neural/RL evaluation exist yet. After this PR is reviewed and merged, the next PR implements candidate-generation, validation, test-vector, seed-freezing, and candidate-manifest tooling only; the frozen manifest, calibration evidence, replicated experiments, and neural/RL evaluation remain deferred to later staged PRs.
 
 ## Executable artifacts
 
