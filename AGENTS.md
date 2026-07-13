@@ -91,8 +91,8 @@ For binary matrix A over F_2:
 ## Next milestone order
 
 1. Specify the [`h-native-research-v2` construction and calibration protocol](RESEARCH_CORPUS_V2_DESIGN.md) in one focused documentation-only PR.
-2. After that PR is reviewed and merged, implement candidate-generation, validation, test-vector, seed-freezing, and candidate-manifest tooling only; no v2 manifest or results exist yet.
-3. Defer external calibration, PR C frozen-manifest review, later replicated classical evaluation, neural-quality comparisons, and RL-quality comparisons to later staged PRs until v2 is reviewed, calibrated, and frozen.
+2. After that PR is reviewed and merged, implement candidate-generation, validation, test-vector, seed-commitment, and candidate-manifest tooling only; no v2 manifest or results exist yet.
+3. After candidate tooling, complete a focused stronger solver-disabled ISD baseline PR before external generation/calibration; defer PR C frozen-manifest review, later replicated classical evaluation, neural-quality comparisons, and RL-quality comparisons to later staged PRs until v2 is reviewed, calibrated, and frozen.
 
 ## Review guidelines
 
@@ -138,7 +138,7 @@ Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOL
 
 ## Research corpus audit quarantine
 
-`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. The audit and certificate contracts are preserved as historical v1 quarantine conclusions. This PR specifies the separate [`h-native-research-v2` construction and calibration protocol](RESEARCH_CORPUS_V2_DESIGN.md). No v2 generator or manifest exists yet. After this PR is reviewed and merged, the next PR implements candidate-generation, validation, test-vector, seed-freezing, and candidate-manifest tooling only; external calibration, PR C frozen-manifest review, later replicated classical evaluation, and neural/RL comparisons remain deferred to later staged PRs until v2 is reviewed, calibrated, and frozen.
+`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. The audit and certificate contracts are preserved as historical v1 quarantine conclusions. This PR specifies the separate [`h-native-research-v2` construction and calibration protocol](RESEARCH_CORPUS_V2_DESIGN.md). No v2 generator or manifest exists yet. After this PR is reviewed and merged, the next PR implements candidate-generation, validation, test-vector, seed-commitment, and candidate-manifest tooling only; a subsequent focused PR implements a stronger solver-disabled ISD baseline before external generation and calibration. PR C frozen-manifest review, later replicated classical evaluation, and neural/RL comparisons remain deferred to later staged PRs until v2 is reviewed, calibrated, and frozen.
 
 ## Research baseline protocol v1
 
