@@ -90,9 +90,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Audit the reproducible classical-baseline layer against the frozen research corpus.
-2. Run replicated classical experiments and improve bounds for unknown-distance cases without changing the frozen manifest silently.
-3. Revisit controlled neural-quality claims only after baseline measurements and ablations are stable.
+1. Harden the research-corpus audit validation and certificate contracts in one focused PR.
+2. After that PR is reviewed and merged, design `h-native-research-v2` separately using coordinate-independent deterministic randomness and preregistered construction/difficulty calibration.
+3. Defer replicated performance, neural-quality, and RL-quality comparisons until v2 is reviewed and calibrated.
 
 ## Review guidelines
 
@@ -138,7 +138,7 @@ Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOL
 
 ## Research corpus audit quarantine
 
-`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. The next milestone is a separately reviewed `h-native-research-v2` design using coordinate-independent deterministic randomness and preregistered calibration.
+`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. This PR hardens the audit and certificate contracts. After review and merge, the next separate milestone is an `h-native-research-v2` design using coordinate-independent deterministic randomness and preregistered construction/difficulty calibration; replicated performance and neural/RL comparisons remain deferred until v2 is reviewed and calibrated.
 
 ## Research baseline protocol v1
 
