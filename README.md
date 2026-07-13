@@ -136,7 +136,7 @@ The protocol includes 6 smoke tasks, all 15 full tasks, 2 smoke run specs, and 4
 
 ## Next milestone
 
-This PR hardens the research-corpus audit validation and certificate contracts. After review and merge, the next separate milestone is `h-native-research-v2` design using coordinate-independent deterministic randomness and preregistered construction/difficulty calibration; replicated performance and neural/RL comparisons remain deferred until v2 is reviewed and calibrated.
+This PR specifies the `h-native-research-v2` construction and calibration protocol design. No v2 generator, manifest, thresholds, case records, calibration results, replicated experiments, or neural/RL evaluation exist yet. After this PR is reviewed and merged, the next PR implements candidate-generation and validation tooling only; replicated experiments and neural/RL evaluation remain deferred until v2 is reviewed, calibrated, and frozen.
 
 ## Executable artifacts
 

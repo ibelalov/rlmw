@@ -90,9 +90,9 @@ For binary matrix A over F_2:
 
 ## Next milestone order
 
-1. Harden the research-corpus audit validation and certificate contracts in one focused PR.
-2. After that PR is reviewed and merged, design `h-native-research-v2` separately using coordinate-independent deterministic randomness and preregistered construction/difficulty calibration.
-3. Defer replicated performance, neural-quality, and RL-quality comparisons until v2 is reviewed and calibrated.
+1. Specify the `h-native-research-v2` construction and calibration protocol in one focused documentation-only PR.
+2. After that PR is reviewed and merged, implement candidate-generation and validation tooling only; no v2 manifest or results exist yet.
+3. Defer replicated experiments, neural-quality comparisons, and RL-quality comparisons until v2 is reviewed, calibrated, and frozen.
 
 ## Review guidelines
 
@@ -138,7 +138,7 @@ Threshold feasibility remains separate from minimum distance: `VERIFIED_THRESHOL
 
 ## Research corpus audit quarantine
 
-`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. This PR hardens the audit and certificate contracts. After review and merge, the next separate milestone is an `h-native-research-v2` design using coordinate-independent deterministic randomness and preregistered construction/difficulty calibration; replicated performance and neural/RL comparisons remain deferred until v2 is reviewed and calibrated.
+`rlmw_research_corpus_audit.py` is standalone classical correctness infrastructure for `h-native-research-v1`. It must not alter the frozen manifest, `rlmw_research_corpus.py`, baseline schemas, or solver payloads. Audit JSONL is generated output and must not be committed. The v1 corpus is quarantined for contract/audit regression only and must not be used for solver-superiority, neural/RL-quality, or benchmark-difficulty claims. The audit and certificate contracts are preserved as historical v1 quarantine conclusions. This PR specifies the separate `h-native-research-v2` construction and calibration protocol. No v2 generator or manifest exists yet. After this PR is reviewed and merged, the next PR implements candidate-generation and validation tooling only; replicated experiments and neural/RL comparisons remain deferred until v2 is reviewed, calibrated, and frozen.
 
 ## Research baseline protocol v1
 
