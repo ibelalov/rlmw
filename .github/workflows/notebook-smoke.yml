@@ -78,6 +78,10 @@ jobs:
           cmp /tmp/rlmw_v2_pool_a/candidate_pool_manifest.json /tmp/rlmw_v2_pool_b/candidate_pool_manifest.json
           python rlmw_research_corpus_v2.py validate-candidate-pool /tmp/rlmw_v2_pool_a/candidate_pool_manifest.json
           python rlmw_research_corpus_v2.py summary /tmp/rlmw_v2_pool_a/candidate_pool_manifest.json
+          rm -rf /tmp/rlmw_v2_accepted
+          python rlmw_research_corpus_v2.py generate-candidate-pool --smoke --profile accepted --output-dir /tmp/rlmw_v2_accepted
+          python rlmw_research_corpus_v2.py validate-candidate-pool /tmp/rlmw_v2_accepted/candidate_pool_manifest.json
+          python rlmw_research_corpus_v2.py summary /tmp/rlmw_v2_accepted/candidate_pool_manifest.json
           git diff --check
           test -z "$(git ls-files 'candidate_pool_manifest.json' '*v2*manifest*.json' --exclude-standard)"
 

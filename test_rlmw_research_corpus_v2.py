@@ -114,6 +114,43 @@ class V2CandidateToolingTests(unittest.TestCase):
             self.assertEqual(v2.main(["validate-candidate-pool", str(p1)]), 0)
             self.assertEqual(v2.main(["summary", str(p1)]), 0)
 
+    def test_structural_status_fail_closed(self):
+        rec = v2.build_record("dense-n96-r48-p50", 0, 0, audit_cap=0, profile="preaudit")
+        self.assertEqual(rec["structural_status"], v2.AUDIT_NOT_RUN)
+        self.assertFalse(rec["calibration_ready"])
+        rec = v2.build_record("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="preaudit", audit_resource_limit_entries=1)
+        self.assertEqual(rec["structural_status"], v2.AUDIT_RESOURCE_LIMIT)
+        with self.assertRaises(v2.V2Error):
+            v2.build_record("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted", audit_resource_limit_entries=1)
+
+    def test_manifest_profiles_and_status_tampering(self):
+        pre = v2.build_manifest(v2.generate_records(smoke=True), profile="preaudit")
+        self.assertFalse(pre["calibration_ready"])
+        v2.validate_manifest(pre)
+        bad = copy.deepcopy(pre)
+        bad["generation_profile"] = "accepted"
+        bad["calibration_ready"] = True
+        bad["candidate_manifest_digest"] = v2.json_digest("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"})
+        with self.assertRaises(v2.V2Error):
+            v2.validate_manifest(bad)
+        bad = copy.deepcopy(pre)
+        idx = next(i for i, r in enumerate(bad["records"]) if r["parameter_stratum_id"] in v2.DENSE_STRATA)
+        bad["records"][idx]["structural_status"] = v2.STRUCTURALLY_ACCEPTED
+        bad["records"][idx]["protected_record_sha256"] = v2.json_digest("protected_record", v2.protected_without_digest(bad["records"][idx]))
+        bad["candidate_manifest_digest"] = v2.json_digest("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"})
+        with self.assertRaises(v2.V2Error):
+            v2.validate_manifest(bad)
+
+    def test_cli_accepted_and_preaudit_profiles(self):
+        with tempfile.TemporaryDirectory() as pre, tempfile.TemporaryDirectory() as acc:
+            self.assertEqual(v2.main(["generate-candidate-pool", "--smoke", "--profile", "preaudit", "--output-dir", pre]), 0)
+            pre_payload = json.loads((Path(pre) / "candidate_pool_manifest.json").read_text())
+            self.assertFalse(pre_payload["calibration_ready"])
+            self.assertEqual(v2.main(["generate-candidate-pool", "--smoke", "--profile", "accepted", "--output-dir", acc]), 0)
+            acc_payload = json.loads((Path(acc) / "candidate_pool_manifest.json").read_text())
+            self.assertTrue(acc_payload["calibration_ready"])
+            self.assertEqual(v2.main(["validate-candidate-pool", str(Path(acc) / "candidate_pool_manifest.json")]), 0)
+
     def test_commitments_and_public_seed_vectors(self):
         self.assertEqual(v2.calibration_seed("threshold_fit_seed", 0), v2.EXPECTED_TEST_VECTORS["threshold_fit_seed_0"])
         self.assertEqual(v2.calibration_seed("tier_validation_seed", 0), v2.EXPECTED_TEST_VECTORS["tier_validation_seed_0"])

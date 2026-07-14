@@ -26,6 +26,11 @@ BASE_SEED = bytes.fromhex("726c6d772d682d6e61746976652d76322d63616e6469646174652
 HARD_SMALL_CIRCUIT_CAP = 6
 MAX_SPARSE_ATTEMPTS = 20000
 DUMMY_FINAL_EVAL_SEEDS = tuple(bytes.fromhex(f"d00df00d0000000000000000{i:08x}") for i in range(8))
+AUDIT_NOT_RUN = "AUDIT_NOT_RUN"
+AUDIT_RESOURCE_LIMIT = "AUDIT_RESOURCE_LIMIT"
+REJECTED_SMALL_CIRCUIT = "REJECTED_SMALL_CIRCUIT"
+STRUCTURALLY_ACCEPTED = "STRUCTURALLY_ACCEPTED"
+PREAUDIT = "PREAUDIT"
 
 def construction_batch_id(index: int) -> str:
     require_uint(index, "construction_batch_index")
@@ -590,7 +595,7 @@ def _has_four_cycle(H: BinaryMatrix) -> bool:
     return False
 
 
-def validate_matrix(H: BinaryMatrix, stratum: str, expected_rank: Optional[int] = None, small_circuit_cap: int = 0, require_audit_pass: bool = False) -> Dict[str, Any]:
+def validate_matrix(H: BinaryMatrix, stratum: str, expected_rank: Optional[int] = None, small_circuit_cap: int = 0, require_audit_pass: bool = False, audit_resource_limit_entries: int = 2_000_000) -> Dict[str, Any]:
     rows = H.as_lists(); m = len(rows); n = H.ncols
     if any(bit not in (0, 1) or isinstance(bit, bool) for row in rows for bit in row):
         raise V2Error("non-binary entry")
@@ -622,7 +627,7 @@ def validate_matrix(H: BinaryMatrix, stratum: str, expected_rank: Optional[int] 
             raise V2Error("check degree mismatch")
         if _has_four_cycle(H):
             raise V2Error("four-cycle detected")
-    audit = small_circuit_audit(H, small_circuit_cap) if small_circuit_cap else {"status": "NOT_RUN", "cap": 0}
+    audit = small_circuit_audit(H, small_circuit_cap, resource_limit_entries=audit_resource_limit_entries) if small_circuit_cap else {"status": "NOT_RUN", "cap": 0}
     if require_audit_pass and audit["status"] != "PASS":
         raise V2Error("required small-circuit audit did not pass")
     return {"rank": rank, "small_circuit": audit}
@@ -770,7 +775,21 @@ def config_digest() -> str:
     return typed_digest(("configuration_digest", PROTOCOL_ID, GENERATOR_ID, BASE_SEED, dense, sparse, planted_d, planted_s, controls))
 
 
-def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0) -> Dict[str, Any]:
+def structural_status_from_audit(audit: Mapping[str, Any], audit_cap: int, profile: str) -> Tuple[str, bool]:
+    if audit_cap == 0 or audit.get("status") == "NOT_RUN":
+        return AUDIT_NOT_RUN, False
+    if audit.get("status") == "RESOURCE_LIMIT":
+        return AUDIT_RESOURCE_LIMIT, False
+    if audit.get("status") == "FOUND_WITNESS":
+        return REJECTED_SMALL_CIRCUIT, False
+    if audit.get("status") == "PASS" and audit_cap >= HARD_SMALL_CIRCUIT_CAP:
+        return STRUCTURALLY_ACCEPTED, profile == "accepted"
+    return PREAUDIT, False
+
+def _is_audit_applicable(stratum: str) -> bool:
+    return stratum in DENSE_STRATA or stratum in SPARSE_STRATA or stratum in PLANTED_DENSE_STRATA or stratum in PLANTED_SPARSE_STRATA
+
+def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Dict[str, Any]:
     family = _family_for(stratum)
     witness = None; provenance: Dict[str, Any] = {}; attempt = 0
     if stratum in DENSE_STRATA:
@@ -792,7 +811,13 @@ def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0) -> Dic
         raise V2Error(f"unknown stratum {stratum}")
     if witness is not None:
         validate_planted_witness(H, witness)
-    validation = validate_matrix(H, stratum, expected_rank, audit_cap, require_audit_pass=False)
+    validation = validate_matrix(H, stratum, expected_rank, audit_cap, require_audit_pass=False, audit_resource_limit_entries=audit_resource_limit_entries)
+    if _is_audit_applicable(stratum):
+        structural_status, calibration_ready = structural_status_from_audit(validation["small_circuit"], audit_cap, profile)
+        if profile == "accepted" and structural_status != STRUCTURALLY_ACCEPTED:
+            raise V2Error(f"candidate is not structurally accepted: {structural_status}")
+    else:
+        structural_status, calibration_ready = STRUCTURALLY_ACCEPTED, profile == "accepted"
     lineage = lineage_group_id(family, stratum, batch)
     protected = {
         "protocol_id": PROTOCOL_ID, "generator_id": GENERATOR_ID, "source_commit": _source_commit(),
@@ -801,7 +826,7 @@ def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0) -> Dic
         "construction_batch_index": batch, "case_slot": slot, "base_seed_sha256": hashlib.sha256(BASE_SEED).hexdigest(),
         "construction_attempt": attempt, "lineage_group_id": lineage, "n": H.ncols, "r": len(H.rows),
         "H_rows": H.row_strings(), "public_h_sha256": public_h_sha256(H), "row_space_sha256": row_space_sha256(H),
-        "validation": validation, "evaluator_only_provenance": provenance,
+        "validation": validation, "structural_status": structural_status, "generation_profile": profile, "calibration_ready": calibration_ready, "audit_resource_limit_entries": audit_resource_limit_entries, "evaluator_only_provenance": provenance,
     }
     if witness is not None:
         protected["evaluator_only_provenance"]["planted_witness_support"] = list(witness)
@@ -877,10 +902,11 @@ def canonical_json(obj: Any) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8") + b"\n"
 
 
-def build_manifest(records: List[Dict[str, Any]], full: bool = False) -> Dict[str, Any]:
+def build_manifest(records: List[Dict[str, Any]], full: bool = False, profile: str = "preaudit") -> Dict[str, Any]:
     recs = copy.deepcopy(records)
     assign_splits(recs, full=full)
-    payload = {"protocol_id": PROTOCOL_ID, "generator_id": GENERATOR_ID, "manifest_kind": "candidate_pool_manifest", "is_frozen_v2_manifest": False, "source_commit": _source_commit(), "configuration_digest": config_digest(), "records": recs}
+    calibration_ready = profile == "accepted" and all(r.get("calibration_ready") is True and r.get("structural_status") == STRUCTURALLY_ACCEPTED for r in recs)
+    payload = {"protocol_id": PROTOCOL_ID, "generator_id": GENERATOR_ID, "manifest_kind": "candidate_pool_manifest", "generation_profile": profile, "calibration_ready": calibration_ready, "is_frozen_v2_manifest": False, "source_commit": _source_commit(), "configuration_digest": config_digest(), "records": recs}
     payload["candidate_manifest_digest"] = json_digest("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"})
     return payload
 
@@ -897,10 +923,10 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
     records = copy.deepcopy(payload.get("records"))
     if not isinstance(records, list):
         raise V2Error("records must be a list")
-    allowed_top = {"protocol_id", "generator_id", "manifest_kind", "is_frozen_v2_manifest", "source_commit", "configuration_digest", "records", "candidate_manifest_digest"}
+    allowed_top = {"protocol_id", "generator_id", "manifest_kind", "generation_profile", "calibration_ready", "is_frozen_v2_manifest", "source_commit", "configuration_digest", "records", "candidate_manifest_digest"}
     if set(payload.keys()) - allowed_top:
         raise V2Error("unknown manifest fields")
-    allowed_record = {"protocol_id", "generator_id", "source_commit", "configuration_digest", "case_id", "family_id", "parameter_stratum_id", "construction_batch_id", "construction_batch_index", "case_slot", "base_seed_sha256", "construction_attempt", "lineage_group_id", "n", "r", "H_rows", "public_h_sha256", "row_space_sha256", "validation", "evaluator_only_provenance", "protected_record_sha256", "split"}
+    allowed_record = {"protocol_id", "generator_id", "source_commit", "configuration_digest", "case_id", "family_id", "parameter_stratum_id", "construction_batch_id", "construction_batch_index", "case_slot", "base_seed_sha256", "construction_attempt", "lineage_group_id", "n", "r", "H_rows", "public_h_sha256", "row_space_sha256", "validation", "structural_status", "generation_profile", "calibration_ready", "audit_resource_limit_entries", "evaluator_only_provenance", "protected_record_sha256", "split"}
     for rec in records:
         if not isinstance(rec, dict):
             raise V2Error("record must be object")
@@ -924,10 +950,10 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
         if "planted" in family:
             support = rec.get("evaluator_only_provenance", {}).get("planted_witness_support")
             validate_planted_witness(H, support)
-        validation = validate_matrix(H, rec["parameter_stratum_id"], rec["r"], rec.get("validation", {}).get("small_circuit", {}).get("cap", 0), False)
+        validation = validate_matrix(H, rec["parameter_stratum_id"], rec["r"], rec.get("validation", {}).get("small_circuit", {}).get("cap", 0), False, rec.get("audit_resource_limit_entries", 2_000_000))
         if validation != rec["validation"]:
             raise V2Error("validation metadata mismatch")
-        regenerated = build_record(rec["parameter_stratum_id"], rec["construction_batch_index"], rec["case_slot"], rec["validation"]["small_circuit"]["cap"])
+        regenerated = build_record(rec["parameter_stratum_id"], rec["construction_batch_index"], rec["case_slot"], rec["validation"]["small_circuit"]["cap"], rec.get("generation_profile", "preaudit"), rec.get("audit_resource_limit_entries", 2_000_000))
         regenerated["split"] = rec["split"]
         if protected_without_digest(regenerated) != protected_without_digest(rec):
             raise V2Error("regenerated protected record mismatch")
@@ -936,6 +962,12 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
         lineages.setdefault(rec["lineage_group_id"], []).append(rec)
     if any(len(v) != 2 for v in lineages.values()):
         raise V2Error("lineage group size mismatch")
+    if payload.get("generation_profile") == "accepted":
+        for rec in payload["records"]:
+            if _is_audit_applicable(rec["parameter_stratum_id"]) and (rec.get("structural_status") != STRUCTURALLY_ACCEPTED or rec.get("validation", {}).get("small_circuit", {}).get("status") != "PASS" or rec.get("validation", {}).get("small_circuit", {}).get("cap", 0) < HARD_SMALL_CIRCUIT_CAP or rec.get("calibration_ready") is not True):
+                raise V2Error("accepted manifest contains incomplete audit record")
+        if payload.get("calibration_ready") is not True:
+            raise V2Error("accepted manifest is not calibration-ready")
 
 
 def calibration_seed(role: str, index: int) -> str:
@@ -1023,24 +1055,29 @@ def sparse_feasibility_report() -> Dict[str, int]:
     return report
 
 
-def generate_records(full: bool = False, smoke: bool = False, audit_cap: int = 0) -> List[Dict[str, Any]]:
+def generate_records(full: bool = False, smoke: bool = False, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     if full:
         for stratum in CONTROL_STRATA:
-            records += [build_record(stratum, 0, 0, audit_cap), build_record(stratum, 0, 1, audit_cap)]
+            records += [build_record(stratum, 0, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, 0, 1, audit_cap, profile, audit_resource_limit_entries)]
         for stratum in DENSE_STRATA:
-            for batch in range(9): records += [build_record(stratum, batch, 0, audit_cap), build_record(stratum, batch, 1, audit_cap)]
+            for batch in range(9): records += [build_record(stratum, batch, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, batch, 1, audit_cap, profile, audit_resource_limit_entries)]
         for stratum in SPARSE_STRATA:
-            for batch in range(9): records += [build_record(stratum, batch, 0, audit_cap), build_record(stratum, batch, 1, audit_cap)]
+            for batch in range(9): records += [build_record(stratum, batch, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, batch, 1, audit_cap, profile, audit_resource_limit_entries)]
         for stratum in list(PLANTED_DENSE_STRATA) + list(PLANTED_SPARSE_STRATA):
-            for batch in range(4): records += [build_record(stratum, batch, 0, audit_cap), build_record(stratum, batch, 1, audit_cap)]
+            for batch in range(4): records += [build_record(stratum, batch, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, batch, 1, audit_cap, profile, audit_resource_limit_entries)]
         return records
     # Bounded CI smoke: one complete group from representative classes plus all controls.
+    if smoke and profile == "accepted":
+        strata = ["ctrl-hamming-m4", "ctrl-ext-hamming-m4"]
+        for stratum in strata:
+            records += [build_record(stratum, 0, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, 0, 1, audit_cap, profile, audit_resource_limit_entries)]
+        return records
     strata = list(CONTROL_STRATA) if not smoke else ["ctrl-hamming-m4", "ctrl-ext-hamming-m4"]
     for stratum in strata:
-        records += [build_record(stratum, 0, 0, audit_cap), build_record(stratum, 0, 1, audit_cap)]
+        records += [build_record(stratum, 0, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, 0, 1, audit_cap, profile, audit_resource_limit_entries)]
     for stratum in ["dense-n96-r48-p50", "sparse-reg-n120-r60-dv3-dc6", "planted-dense-n96-r48-w10", "planted-sparse-n120-r60-w10"]:
-        records += [build_record(stratum, 0, 0, audit_cap), build_record(stratum, 0, 1, audit_cap)]
+        records += [build_record(stratum, 0, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, 0, 1, audit_cap, profile, audit_resource_limit_entries)]
     return records
 
 
@@ -1065,7 +1102,7 @@ def self_test() -> Dict[str, Any]:
         if audit["status"] != "FOUND_WITNESS" or audit["weight"] != weight:
             raise V2Error(f"audit fixture failed for weight {weight}: {audit}")
     report = sparse_feasibility_report()
-    manifest = build_manifest(generate_records(smoke=True), full=False)
+    manifest = build_manifest(generate_records(smoke=True), full=False, profile="preaudit")
     validate_manifest(manifest, full=False)
     return {"status": "PASS", "test_vector_digest": vector_digest, "sparse_feasibility_attempts": report}
 
@@ -1073,8 +1110,11 @@ def self_test() -> Dict[str, Any]:
 def _write_manifest(args: argparse.Namespace) -> None:
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    records = generate_records(full=args.full, smoke=args.smoke, audit_cap=args.audit_cap)
-    payload = build_manifest(records, full=args.full)
+    audit_cap = HARD_SMALL_CIRCUIT_CAP if args.profile == "accepted" and args.audit_cap is None else (0 if args.audit_cap is None else args.audit_cap)
+    if args.profile == "accepted" and audit_cap < HARD_SMALL_CIRCUIT_CAP:
+        raise V2Error("accepted generation requires audit cap at least 6")
+    records = generate_records(full=args.full, smoke=args.smoke, audit_cap=audit_cap, profile=args.profile, audit_resource_limit_entries=args.audit_resource_limit_entries)
+    payload = build_manifest(records, full=args.full, profile=args.profile)
     path = out / "candidate_pool_manifest.json"
     path.write_bytes(canonical_json(payload))
     print(f"wrote {path} digest={payload['candidate_manifest_digest']} records={len(payload['records'])}")
@@ -1085,7 +1125,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("self-test")
     sub.add_parser("print-test-vectors")
-    g = sub.add_parser("generate-candidate-pool"); g.add_argument("--output-dir", required=True); g.add_argument("--full", action="store_true"); g.add_argument("--smoke", action="store_true"); g.add_argument("--audit-cap", type=int, default=0)
+    g = sub.add_parser("generate-candidate-pool"); g.add_argument("--output-dir", required=True); g.add_argument("--full", action="store_true"); g.add_argument("--smoke", action="store_true"); g.add_argument("--profile", choices=["preaudit", "accepted"], default="preaudit"); g.add_argument("--audit-cap", type=int, default=None); g.add_argument("--audit-resource-limit-entries", type=int, default=2_000_000)
     v = sub.add_parser("validate-candidate-pool"); v.add_argument("manifest"); v.add_argument("--full", action="store_true")
     s = sub.add_parser("summary"); s.add_argument("manifest")
     sub.add_parser("sparse-feasibility")
@@ -1100,7 +1140,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for rec in payload.get("records", []):
                 counts[rec["parameter_stratum_id"]] = counts.get(rec["parameter_stratum_id"], 0) + 1
                 splits[rec.get("split", "?")] = splits.get(rec.get("split", "?"), 0) + 1
-            print(json.dumps({"records": len(payload.get("records", [])), "strata": counts, "splits": splits, "digest": payload.get("candidate_manifest_digest")}, sort_keys=True)); return 0
+            statuses={}
+            for r in payload.get("records", []): statuses[r.get("structural_status", "?")] = statuses.get(r.get("structural_status", "?"), 0) + 1
+            print(json.dumps({"records": len(payload.get("records", [])), "strata": counts, "splits": splits, "structural_statuses": statuses, "calibration_ready": payload.get("calibration_ready"), "digest": payload.get("candidate_manifest_digest")}, sort_keys=True)); return 0
         if args.cmd == "sparse-feasibility": print(json.dumps(sparse_feasibility_report(), sort_keys=True)); return 0
     except (V2Error, OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
