@@ -124,20 +124,65 @@ class V2CandidateToolingTests(unittest.TestCase):
             v2.build_record("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted", audit_resource_limit_entries=1)
 
     def test_audit_gated_retry_selects_next_attempt(self):
-        calls = []
         original = v2.small_circuit_audit
-        def fake_audit(H, cap, resource_limit_entries=2_000_000):
-            calls.append(v2.public_h_sha256(H))
-            if len(calls) == 1:
-                return {"status": "FOUND_WITNESS", "cap": cap, "weight": 3, "columns": [0, 1, 2]}
-            return {"status": "PASS", "cap": cap, "estimated_entries": 1}
-        try:
+        def run_once():
+            calls = []
+            def fake_audit(H, cap, resource_limit_entries=2_000_000):
+                calls.append(v2.public_h_sha256(H))
+                if len(calls) == 1:
+                    return {"status": "FOUND_WITNESS", "cap": cap, "weight": 3, "columns": [0, 1, 2]}
+                return {"status": "PASS", "cap": cap, "estimated_entries": 1}
             v2.small_circuit_audit = fake_audit
             H, attempt, audit = v2.generate_dense("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted")
+            return H, attempt, audit, list(calls)
+        try:
+            first = run_once()
+            second = run_once()
+            self.assertEqual(first[1], 1)
+            self.assertEqual(second[1], 1)
+            self.assertEqual(v2.public_h_sha256(first[0]), v2.public_h_sha256(second[0]))
+            self.assertEqual(first[2], second[2])
+            self.assertEqual(first[3], second[3])
+        finally:
+            v2.small_circuit_audit = original
+
+    def test_structural_failure_in_accepted_advances_attempt(self):
+        original_validate = v2.validate_matrix
+        original_audit = v2.small_circuit_audit
+        calls = []
+        def fake_validate(H, *args, **kwargs):
+            calls.append(v2.public_h_sha256(H))
+            if len(calls) == 1:
+                raise v2.V2Error("synthetic structural failure")
+            return original_validate(H, *args, **kwargs)
+        def fake_audit(H, cap, resource_limit_entries=2_000_000):
+            return {"status": "PASS", "cap": cap, "estimated_entries": 1}
+        try:
+            v2.validate_matrix = fake_validate
+            v2.small_circuit_audit = fake_audit
+            _, attempt, audit = v2.generate_dense("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted")
             self.assertEqual(attempt, 1)
             self.assertEqual(audit["status"], "PASS")
-            H2, attempt2, audit2 = v2.generate_dense("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted")
-            self.assertEqual(attempt2, 0)  # fake audit now immediately passes deterministically for current function state
+        finally:
+            v2.validate_matrix = original_validate
+            v2.small_circuit_audit = original_audit
+
+    def test_resource_limit_exits_immediately_for_generators(self):
+        original = v2.small_circuit_audit
+        def run(gen, *args):
+            calls = []
+            def fake_audit(H, cap, resource_limit_entries=2_000_000):
+                calls.append(v2.public_h_sha256(H))
+                return {"status": "RESOURCE_LIMIT", "cap": cap, "estimated_entries": 999}
+            v2.small_circuit_audit = fake_audit
+            with self.assertRaises(v2.AuditResourceLimitError):
+                gen(*args, audit_cap=6, profile="accepted")
+            self.assertEqual(len(calls), 1)
+        try:
+            run(v2.generate_dense, "dense-n96-r48-p50", 0, 0)
+            run(v2.generate_sparse, "sparse-reg-n120-r60-dv3-dc6", 0, 0)
+            run(v2.generate_planted_dense, "planted-dense-n96-r48-w10", 0, 0)
+            run(v2.generate_planted_sparse, "planted-sparse-n120-r60-w10", 0, 0)
         finally:
             v2.small_circuit_audit = original
 

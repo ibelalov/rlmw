@@ -39,6 +39,9 @@ def construction_batch_id(index: int) -> str:
 class V2Error(ValueError):
     """Protocol/validation error for v2 candidate tooling."""
 
+class AuditResourceLimitError(V2Error):
+    """Small-circuit audit resource limit; fail closed without retry."""
+
 
 def require_uint(value: Any, name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -365,23 +368,21 @@ def generate_dense(stratum: str, construction_batch_id: int, case_slot: int, max
     n, r, p, _ = DENSE_STRATA[stratum]
     threshold = int(math.floor(p * (1 << 64)))
     for attempt in range(require_uint(max_attempts, "max_attempts")):
-        rows = []
-        for i in range(r):
-            row = []
-            for j in range(n):
-                ctx = make_context("dense_full_rank_hash_v1", stratum, construction_batch_id, case_slot, BASE_SEED, attempt, ("coord", i, j), "dense_entry")
-                row.append(1 if _u64(ctx) < threshold else 0)
-            rows.append(row)
-        H = BinaryMatrix.from_rows(rows)
         try:
+            rows = []
+            for i in range(r):
+                row = []
+                for j in range(n):
+                    ctx = make_context("dense_full_rank_hash_v1", stratum, construction_batch_id, case_slot, BASE_SEED, attempt, ("coord", i, j), "dense_entry")
+                    row.append(1 if _u64(ctx) < threshold else 0)
+                rows.append(row)
+            H = BinaryMatrix.from_rows(rows)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
-            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
-            if ok:
-                return H, attempt, audit
         except V2Error:
-            if profile == "accepted" and audit_cap:
-                raise
             continue
+        ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+        if ok:
+            return H, attempt, audit
     raise V2Error(f"dense stratum {stratum} exhausted {max_attempts} attempts")
 
 
@@ -450,18 +451,16 @@ def generate_sparse(stratum: str, construction_batch_id: int, case_slot: int, ma
     if dv != 3 or dc != 6 or n * dv != r * dc:
         raise V2Error("unsupported sparse degree contract")
     for attempt in range(require_uint(max_attempts, "max_attempts")):
-        H = _progressive_socket_matrix(stratum, "sparse_simple_biregular_hash_v1", n, r, construction_batch_id, case_slot, attempt)
-        if H is None:
-            continue
         try:
+            H = _progressive_socket_matrix(stratum, "sparse_simple_biregular_hash_v1", n, r, construction_batch_id, case_slot, attempt)
+            if H is None:
+                continue
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
-            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
-            if ok:
-                return H, attempt, audit
         except V2Error:
-            if profile == "accepted" and audit_cap:
-                raise
             continue
+        ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+        if ok:
+            return H, attempt, audit
     raise V2Error(f"{stratum} failed within max_attempts={max_attempts}")
 
 
@@ -480,39 +479,42 @@ def _witness_support(stratum: str, n: int, weight: int, batch: int, slot: int, a
 def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
     n, r, wp = PLANTED_DENSE_STRATA[stratum]
     for attempt in range(max_attempts):
-        supp = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
-        pivot = max(supp)
-        rows = []
-        for i in range(r):
-            row = []
-            parity = 0
-            for j in range(n):
-                if j == pivot:
-                    row.append(0); continue
-                ctx = make_context("planted_dense_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("coord", i, j), "planted_orthogonal_row_free_bit")
-                bit = R(ctx, 0)[0] & 1
-                row.append(bit)
-                if j in supp:
-                    parity ^= bit
-            row[pivot] = parity
-            rows.append(row)
-        H = BinaryMatrix.from_rows(rows)
         try:
+            supp = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
+            pivot = max(supp)
+            rows = []
+            for i in range(r):
+                row = []
+                parity = 0
+                for j in range(n):
+                    if j == pivot:
+                        row.append(0); continue
+                    ctx = make_context("planted_dense_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("coord", i, j), "planted_orthogonal_row_free_bit")
+                    bit = R(ctx, 0)[0] & 1
+                    row.append(bit)
+                    if j in supp:
+                        parity ^= bit
+                row[pivot] = parity
+                rows.append(row)
+            H = BinaryMatrix.from_rows(rows)
             validate_planted_witness(H, supp, wp)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
-            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
-            if not ok:
-                continue
+        except V2Error:
+            continue
+        ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+        if not ok:
+            continue
+        try:
             base_digest = public_h_sha256(H)
             base_support = list(supp)
-            H, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
+            H2, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
             transform["base_candidate_digest"] = base_digest
             transform["base_witness_support"] = base_support
             supp2 = [transform["coordinate_permutation_inverse"][i] for i in supp] if transform.get("coordinate_permutation_inverse") else supp
-            validate_planted_witness(H, supp2, wp)
+            validate_planted_witness(H2, supp2, wp)
             transform["base_audit"] = audit
             transform["base_accepted_attempt"] = attempt
-            return H, sorted(supp2), attempt, transform, audit
+            return H2, sorted(supp2), attempt, transform, audit
         except V2Error:
             continue
     raise V2Error(f"planted dense {stratum} exhausted attempts")
@@ -546,27 +548,30 @@ def _apply_planted_transform(H: BinaryMatrix, stratum: str, batch: int, slot: in
 def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
     n, r, wp = PLANTED_SPARSE_STRATA[stratum]
     for attempt in range(max_attempts):
-        support = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
-        checks_needed = (3 * wp) // 2
-        chosen_checks = _ranked_indices(r, "planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, attempt, "planted_sparse_witness_check_priority")[:checks_needed]
-        witness_sockets = [(v, vs) for v in support for vs in range(3)]
-        witness_sockets.sort(key=lambda x: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("socket", x[0], x[1]), "planted_sparse_witness_socket_priority")), x))
-        check_sockets: List[Tuple[int, int]] = []
-        for c in chosen_checks:
-            sockets = list(range(6))
-            sockets.sort(key=lambda cs: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("socket", c, cs), "planted_sparse_witness_check_socket_priority")), cs))
-            check_sockets.extend([(c, sockets[0]), (c, sockets[1])])
-        pre_edges = [(v, vs, c, cs) for (v, vs), (c, cs) in zip(witness_sockets, check_sockets)]
-        nonwitness = [v for v in range(n) if v not in set(support)]
-        H = _progressive_socket_matrix(stratum, "planted_sparse_orthogonal_v1", n, r, construction_batch_id, 0, attempt, pre_edges, "planted_sparse_nonwitness_edge_priority", variables=nonwitness)
-        if H is None:
-            continue
         try:
+            support = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
+            checks_needed = (3 * wp) // 2
+            chosen_checks = _ranked_indices(r, "planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, attempt, "planted_sparse_witness_check_priority")[:checks_needed]
+            witness_sockets = [(v, vs) for v in support for vs in range(3)]
+            witness_sockets.sort(key=lambda x: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("socket", x[0], x[1]), "planted_sparse_witness_socket_priority")), x))
+            check_sockets: List[Tuple[int, int]] = []
+            for c in chosen_checks:
+                sockets = list(range(6))
+                sockets.sort(key=lambda cs: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("socket", c, cs), "planted_sparse_witness_check_socket_priority")), cs))
+                check_sockets.extend([(c, sockets[0]), (c, sockets[1])])
+            pre_edges = [(v, vs, c, cs) for (v, vs), (c, cs) in zip(witness_sockets, check_sockets)]
+            nonwitness = [v for v in range(n) if v not in set(support)]
+            H = _progressive_socket_matrix(stratum, "planted_sparse_orthogonal_v1", n, r, construction_batch_id, 0, attempt, pre_edges, "planted_sparse_nonwitness_edge_priority", variables=nonwitness)
+            if H is None:
+                continue
             validate_planted_witness(H, support, wp)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
-            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
-            if not ok:
-                continue
+        except V2Error:
+            continue
+        ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+        if not ok:
+            continue
+        try:
             base_digest = public_h_sha256(H)
             base_support = list(support)
             H2, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
@@ -817,7 +822,7 @@ def _audit_gate(H: BinaryMatrix, audit_cap: int, profile: str, audit_resource_li
         return False, audit
     if audit["status"] == "RESOURCE_LIMIT":
         if profile == "accepted":
-            raise V2Error("accepted generation hit small-circuit audit resource limit")
+            raise AuditResourceLimitError("accepted generation hit small-circuit audit resource limit")
         return True, audit
     raise V2Error(f"unknown audit status {audit.get('status')}")
 
