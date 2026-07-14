@@ -27,6 +27,10 @@ HARD_SMALL_CIRCUIT_CAP = 6
 MAX_SPARSE_ATTEMPTS = 20000
 DUMMY_FINAL_EVAL_SEEDS = tuple(bytes.fromhex(f"d00df00d0000000000000000{i:08x}") for i in range(8))
 
+def construction_batch_id(index: int) -> str:
+    require_uint(index, "construction_batch_index")
+    return f"rlmw-v2-candidate-batch-{index:06d}"
+
 class V2Error(ValueError):
     """Protocol/validation error for v2 candidate tooling."""
 
@@ -142,13 +146,13 @@ def encode(value: Any, *, allow_list: bool = True) -> bytes:
     raise V2Error(f"unsupported encoded type {type(value).__name__}")
 
 
-def make_context(family_id: str, parameter_stratum_id: str, construction_batch_id: int, case_slot: int, base_seed: bytes, construction_attempt: int, logical_identity: Any, draw_purpose: str) -> Tuple[Any, ...]:
-    require_uint(construction_batch_id, "construction_batch_id")
+def make_context(family_id: str, parameter_stratum_id: str, construction_batch_index: int, case_slot: int, base_seed: bytes, construction_attempt: int, logical_identity: Any, draw_purpose: str) -> Tuple[Any, ...]:
+    batch_id = construction_batch_id(construction_batch_index)
     require_uint(case_slot, "case_slot")
     require_uint(construction_attempt, "construction_attempt")
     if not isinstance(base_seed, bytes):
         raise V2Error("base_seed must be bytes")
-    return (RANDOM_DOMAIN, PROTOCOL_ID, GENERATOR_ID, family_id, parameter_stratum_id, ("construction_batch_id", construction_batch_id), case_slot, base_seed, construction_attempt, logical_identity, draw_purpose)
+    return (RANDOM_DOMAIN, PROTOCOL_ID, GENERATOR_ID, family_id, parameter_stratum_id, batch_id, case_slot, base_seed, construction_attempt, logical_identity, draw_purpose)
 
 
 def R(context: Any, expansion_counter: int = 0) -> bytes:
@@ -166,22 +170,15 @@ def expand(context: Any, nbytes: int) -> bytes:
     return bytes(out[:nbytes])
 
 
-def _freeze_for_digest(value: Any) -> Any:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return "__NONE__"
-    if isinstance(value, dict):
-        return tuple((str(k), _freeze_for_digest(v)) for k, v in sorted(value.items(), key=lambda kv: str(kv[0])))
-    if isinstance(value, list):
-        return tuple(_freeze_for_digest(v) for v in value)
-    if isinstance(value, tuple):
-        return tuple(_freeze_for_digest(v) for v in value)
-    return value
+def typed_digest(value: Any) -> str:
+    return hashlib.sha256(encode(value)).hexdigest()
 
+def json_digest(domain: str, value: Any) -> str:
+    return hashlib.sha256(domain.encode("utf-8") + b"\0" + canonical_json(value)).hexdigest()
+
+# Backward-compatible local alias for tests that recompute manifest digests.
 def _digest(value: Any) -> str:
-    return hashlib.sha256(encode(_freeze_for_digest(value))).hexdigest()
-
+    return typed_digest(value)
 
 def _priority(context: Any) -> bytes:
     return R(context, 0)
@@ -239,12 +236,12 @@ def rref_matrix(H: BinaryMatrix) -> BinaryMatrix:
 
 
 def public_h_sha256(H: BinaryMatrix) -> str:
-    return _digest(("public_h_hash", PROTOCOL_ID, len(H.rows), H.ncols, H))
+    return typed_digest(("public_h_hash", PROTOCOL_ID, len(H.rows), H.ncols, H))
 
 
 def row_space_sha256(H: BinaryMatrix) -> str:
     rref = rref_matrix(H)
-    return _digest(("row_space_hash", PROTOCOL_ID, len(rref.rows), H.ncols, rref))
+    return typed_digest(("row_space_hash", PROTOCOL_ID, len(rref.rows), H.ncols, rref))
 
 DENSE_STRATA = {
     "dense-n96-r48-p50": (96, 48, 0.5, (0.46, 0.54)),
@@ -318,7 +315,7 @@ def generate_control(stratum: str, case_slot: int = 0) -> Tuple[BinaryMatrix, Di
     H, prov = _apply_row_ops_and_permutation(H, stratum, case_slot)
     cert = replay_control_certificate(H, stratum)
     prov["certificate"] = cert
-    if cert["status"] not in ("CERTIFIED_EXACT_DISTANCE", "CERTIFIED_REPLAY_SKIPPED", "RESOURCE_LIMIT"):
+    if cert["status"] not in ("CERTIFIED_EXACT_DISTANCE", "CERTIFIED_THEOREM_DISTANCE"):
         raise V2Error("control certificate replay failed")
     return H, prov
 
@@ -470,7 +467,7 @@ def _witness_support(stratum: str, n: int, weight: int, batch: int, slot: int, a
 def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any]]:
     n, r, wp = PLANTED_DENSE_STRATA[stratum]
     for attempt in range(max_attempts):
-        supp = _witness_support(stratum, n, wp, construction_batch_id, case_slot, attempt)
+        supp = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
         pivot = max(supp)
         rows = []
         for i in range(r):
@@ -479,7 +476,7 @@ def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: 
             for j in range(n):
                 if j == pivot:
                     row.append(0); continue
-                ctx = make_context("planted_dense_orthogonal_v1", stratum, construction_batch_id, case_slot, BASE_SEED, attempt, ("coord", i, j), "planted_orthogonal_row_free_bit")
+                ctx = make_context("planted_dense_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("coord", i, j), "planted_orthogonal_row_free_bit")
                 bit = R(ctx, 0)[0] & 1
                 row.append(bit)
                 if j in supp:
@@ -490,7 +487,11 @@ def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: 
         try:
             validate_planted_witness(H, supp, wp)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
+            base_digest = public_h_sha256(H)
+            base_support = list(supp)
             H, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
+            transform["base_candidate_digest"] = base_digest
+            transform["base_witness_support"] = base_support
             supp2 = [transform["coordinate_permutation_inverse"][i] for i in supp] if transform.get("coordinate_permutation_inverse") else supp
             validate_planted_witness(H, supp2, wp)
             return H, sorted(supp2), attempt, transform
@@ -512,14 +513,16 @@ def _apply_planted_transform(H: BinaryMatrix, stratum: str, batch: int, slot: in
     for new, old in enumerate(perm):
         inv[old] = new
     rows = [[row.bits[old] for old in perm] for row in H.rows]
+    row_operations = []
     if stratum not in PLANTED_SPARSE_STRATA:
         for i in range(r):
             for j in range(i):
                 ctx = make_context("planted_transform_v1", stratum, batch, slot, BASE_SEED, attempt, ("coord", i, j), "row_operation_entry")
                 if R(ctx, 0)[0] & 1:
                     rows[i] = [a ^ b for a, b in zip(rows[i], rows[j])]
+                    row_operations.append([i, j])
     variant = "coordinate_permuted" if stratum in PLANTED_SPARSE_STRATA else "coordinate_permuted_row_operated"
-    return BinaryMatrix.from_rows(rows), {"variant": variant, "coordinate_permutation": perm, "coordinate_permutation_inverse": inv}
+    return BinaryMatrix.from_rows(rows), {"variant": variant, "coordinate_permutation": perm, "coordinate_permutation_inverse": inv, "row_operations": row_operations}
 
 
 def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any]]:
@@ -527,23 +530,27 @@ def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot:
     for attempt in range(max_attempts):
         support = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
         checks_needed = (3 * wp) // 2
-        chosen_checks = _ranked_indices(r, "planted_sparse_orthogonal_v1", stratum, construction_batch_id, case_slot, attempt, "planted_sparse_witness_check_priority")[:checks_needed]
+        chosen_checks = _ranked_indices(r, "planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, attempt, "planted_sparse_witness_check_priority")[:checks_needed]
         witness_sockets = [(v, vs) for v in support for vs in range(3)]
-        witness_sockets.sort(key=lambda x: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, case_slot, BASE_SEED, attempt, ("socket", x[0], x[1]), "planted_sparse_witness_socket_priority")), x))
+        witness_sockets.sort(key=lambda x: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("socket", x[0], x[1]), "planted_sparse_witness_socket_priority")), x))
         check_sockets: List[Tuple[int, int]] = []
         for c in chosen_checks:
             sockets = list(range(6))
-            sockets.sort(key=lambda cs: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, case_slot, BASE_SEED, attempt, ("socket", c, cs), "planted_sparse_witness_check_socket_priority")), cs))
+            sockets.sort(key=lambda cs: (_priority(make_context("planted_sparse_orthogonal_v1", stratum, construction_batch_id, 0, BASE_SEED, attempt, ("socket", c, cs), "planted_sparse_witness_check_socket_priority")), cs))
             check_sockets.extend([(c, sockets[0]), (c, sockets[1])])
         pre_edges = [(v, vs, c, cs) for (v, vs), (c, cs) in zip(witness_sockets, check_sockets)]
         nonwitness = [v for v in range(n) if v not in set(support)]
-        H = _progressive_socket_matrix(stratum, "planted_sparse_orthogonal_v1", n, r, construction_batch_id, case_slot, attempt, pre_edges, "planted_sparse_nonwitness_edge_priority", variables=nonwitness)
+        H = _progressive_socket_matrix(stratum, "planted_sparse_orthogonal_v1", n, r, construction_batch_id, 0, attempt, pre_edges, "planted_sparse_nonwitness_edge_priority", variables=nonwitness)
         if H is None:
             continue
         try:
             validate_planted_witness(H, support, wp)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
+            base_digest = public_h_sha256(H)
+            base_support = list(support)
             H2, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
+            transform["base_candidate_digest"] = base_digest
+            transform["base_witness_support"] = base_support
             support2 = [transform["coordinate_permutation_inverse"][i] for i in support] if transform.get("coordinate_permutation_inverse") else support
             validate_planted_witness(H2, support2, wp)
             return H2, sorted(support2), attempt, {**transform, "witness_check_set": chosen_checks}
@@ -656,18 +663,76 @@ def small_circuit_audit(H: BinaryMatrix, cap: int, resource_limit_entries: int =
     return {"status": "PASS", "cap": cap, "estimated_entries": entries}
 
 
+def kernel_basis(H: BinaryMatrix) -> List[List[int]]:
+    mat = H.as_lists()
+    m, n = len(mat), H.ncols
+    prow = 0
+    pivots: List[int] = []
+    for col in range(n):
+        pivot = next((i for i in range(prow, m) if mat[i][col]), None)
+        if pivot is None:
+            continue
+        mat[prow], mat[pivot] = mat[pivot], mat[prow]
+        for i in range(m):
+            if i != prow and mat[i][col]:
+                mat[i] = [a ^ b for a, b in zip(mat[i], mat[prow])]
+        pivots.append(col)
+        prow += 1
+        if prow == m:
+            break
+    free = [j for j in range(n) if j not in pivots]
+    basis: List[List[int]] = []
+    for f in free:
+        x = [0] * n
+        x[f] = 1
+        for row_i, pcol in enumerate(pivots):
+            if mat[row_i][f]:
+                x[pcol] = 1
+        basis.append(x)
+    return basis
+
+def _syndrome_zero(H: BinaryMatrix, c: Sequence[int]) -> bool:
+    return all(sum(bit & cj for bit, cj in zip(row.bits, c)) % 2 == 0 for row in H.rows)
+
+def exact_kernel_distance_certificate(H: BinaryMatrix, max_k: int = 12) -> Dict[str, Any]:
+    basis = kernel_basis(H)
+    k = len(basis)
+    if k > max_k:
+        return {"status": "RESOURCE_LIMIT", "kernel_dimension": k, "max_k": max_k}
+    best_weight = H.ncols + 1
+    best: Optional[List[int]] = None
+    prev_gray = 0
+    c = [0] * H.ncols
+    count = 0
+    for t in range(1, 1 << k):
+        gray = t ^ (t >> 1)
+        flip = (gray ^ prev_gray).bit_length() - 1
+        c = [a ^ b for a, b in zip(c, basis[flip])]
+        prev_gray = gray
+        count += 1
+        if not _syndrome_zero(H, c):
+            raise V2Error("kernel enumeration produced non-codeword")
+        wt = sum(c)
+        if wt and (wt < best_weight or (wt == best_weight and [i for i,b in enumerate(c) if b] < (best or []))):
+            best_weight = wt
+            best = [i for i, b in enumerate(c) if b]
+    if best is None:
+        raise V2Error("nontrivial random control has no witness")
+    return {"status": "CERTIFIED_EXACT_DISTANCE", "kernel_dimension": k, "enumerated_nonzero_coefficients": count, "finite_lower_bound": best_weight, "finite_upper_bound": best_weight, "exact_distance": best_weight, "canonical_witness_support": best}
+
 def replay_control_certificate(H: BinaryMatrix, stratum: str) -> Dict[str, Any]:
     expected = CONTROL_STRATA[stratum][2]
     if expected is None:
-        audit = small_circuit_audit(H, 6, resource_limit_entries=500_000)
-        return {"status": "CERTIFIED_EXACT_DISTANCE" if audit["status"] == "PASS" else "RESOURCE_LIMIT", "audit": audit}
+        cert = exact_kernel_distance_certificate(H, max_k=12)
+        if cert["status"] != "CERTIFIED_EXACT_DISTANCE":
+            raise V2Error("random control exact enumeration did not complete")
+        return cert
     if stratum.startswith("ctrl-rm1"):
-        # The theorem distance is recorded; exhaustive replay is intentionally out of PR-B CI scope.
-        return {"status": "CERTIFIED_REPLAY_SKIPPED", "theorem_distance": expected, "reason": "RM theorem control"}
+        return {"status": "CERTIFIED_THEOREM_DISTANCE", "theorem_id": stratum.replace("ctrl-", "theorem-"), "exact_distance": expected, "structural_rank": gf2_rank(H.as_lists())}
     audit = small_circuit_audit(H, max(0, expected - 1), resource_limit_entries=500_000)
     if audit["status"] != "PASS":
         return {"status": "CERTIFICATE_FAILED", "audit": audit}
-    return {"status": "CERTIFIED_EXACT_DISTANCE", "exact_distance": expected, "audit": audit}
+    return {"status": "CERTIFIED_THEOREM_DISTANCE", "theorem_id": stratum.replace("ctrl-", "theorem-"), "exact_distance": expected, "structural_replay": audit}
 
 
 def _family_for(stratum: str) -> str:
@@ -679,16 +744,20 @@ def _family_for(stratum: str) -> str:
     raise V2Error(f"unknown stratum {stratum}")
 
 
-def case_id(family: str, stratum: str, batch: int, slot: int) -> str:
-    return _digest(("case_id", PROTOCOL_ID, GENERATOR_ID, family, stratum, ("construction_batch_id", batch), slot))[:32]
+def case_id(family: str, stratum: str, batch: int | str, slot: int) -> str:
+    bid = construction_batch_id(batch) if isinstance(batch, int) and not isinstance(batch, bool) else batch
+    if not isinstance(bid, str): raise V2Error("construction_batch_id must be string")
+    return typed_digest(("case_id", PROTOCOL_ID, GENERATOR_ID, family, stratum, bid, slot))[:32]
 
 
-def lineage_group_id(family: str, stratum: str, batch: int) -> str:
-    return _digest(("lineage_group_id", PROTOCOL_ID, family, stratum, ("construction_batch_id", batch)))
+def lineage_group_id(family: str, stratum: str, batch: int | str) -> str:
+    bid = construction_batch_id(batch) if isinstance(batch, int) and not isinstance(batch, bool) else batch
+    if not isinstance(bid, str): raise V2Error("construction_batch_id must be string")
+    return typed_digest(("lineage_group_id", PROTOCOL_ID, family, stratum, bid))
 
 
 def split_key(stratum: str, lineage: str) -> str:
-    return _digest(("split_key", PROTOCOL_ID, stratum, lineage))
+    return typed_digest(("split_key", PROTOCOL_ID, stratum, lineage))
 
 
 def config_digest() -> str:
@@ -698,7 +767,7 @@ def config_digest() -> str:
     planted_d = tuple((k,) + tuple(str(x) for x in v) for k, v in sorted(PLANTED_DENSE_STRATA.items()))
     planted_s = tuple((k,) + tuple(str(x) for x in v) for k, v in sorted(PLANTED_SPARSE_STRATA.items()))
     controls = tuple((k,) + tuple("none" if x is None else str(x) for x in v) for k, v in sorted(CONTROL_STRATA.items()))
-    return _digest(("configuration_digest", PROTOCOL_ID, GENERATOR_ID, BASE_SEED, dense, sparse, planted_d, planted_s, controls))
+    return typed_digest(("configuration_digest", PROTOCOL_ID, GENERATOR_ID, BASE_SEED, dense, sparse, planted_d, planted_s, controls))
 
 
 def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0) -> Dict[str, Any]:
@@ -728,15 +797,15 @@ def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0) -> Dic
     protected = {
         "protocol_id": PROTOCOL_ID, "generator_id": GENERATOR_ID, "source_commit": _source_commit(),
         "configuration_digest": config_digest(), "case_id": case_id(family, stratum, batch, slot),
-        "family_id": family, "parameter_stratum_id": stratum, "construction_batch_id": batch,
-        "case_slot": slot, "base_seed_sha256": hashlib.sha256(BASE_SEED).hexdigest(),
+        "family_id": family, "parameter_stratum_id": stratum, "construction_batch_id": construction_batch_id(batch),
+        "construction_batch_index": batch, "case_slot": slot, "base_seed_sha256": hashlib.sha256(BASE_SEED).hexdigest(),
         "construction_attempt": attempt, "lineage_group_id": lineage, "n": H.ncols, "r": len(H.rows),
         "H_rows": H.row_strings(), "public_h_sha256": public_h_sha256(H), "row_space_sha256": row_space_sha256(H),
         "validation": validation, "evaluator_only_provenance": provenance,
     }
     if witness is not None:
         protected["evaluator_only_provenance"]["planted_witness_support"] = list(witness)
-    protected["protected_record_sha256"] = _digest(("protected_record", protected_without_digest(protected)))
+    protected["protected_record_sha256"] = json_digest("protected_record", protected_without_digest(protected))
     return protected
 
 
@@ -812,7 +881,7 @@ def build_manifest(records: List[Dict[str, Any]], full: bool = False) -> Dict[st
     recs = copy.deepcopy(records)
     assign_splits(recs, full=full)
     payload = {"protocol_id": PROTOCOL_ID, "generator_id": GENERATOR_ID, "manifest_kind": "candidate_pool_manifest", "is_frozen_v2_manifest": False, "source_commit": _source_commit(), "configuration_digest": config_digest(), "records": recs}
-    payload["candidate_manifest_digest"] = _digest(("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"}))
+    payload["candidate_manifest_digest"] = json_digest("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"})
     return payload
 
 
@@ -822,12 +891,21 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
         raise V2Error("bad protocol/generator")
     if payload.get("is_frozen_v2_manifest") is not False:
         raise V2Error("candidate pool must not be marked frozen")
-    expected_digest = _digest(("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"}))
+    expected_digest = json_digest("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"})
     if payload.get("candidate_manifest_digest") != expected_digest:
         raise V2Error("candidate manifest digest mismatch")
     records = copy.deepcopy(payload.get("records"))
     if not isinstance(records, list):
         raise V2Error("records must be a list")
+    allowed_top = {"protocol_id", "generator_id", "manifest_kind", "is_frozen_v2_manifest", "source_commit", "configuration_digest", "records", "candidate_manifest_digest"}
+    if set(payload.keys()) - allowed_top:
+        raise V2Error("unknown manifest fields")
+    allowed_record = {"protocol_id", "generator_id", "source_commit", "configuration_digest", "case_id", "family_id", "parameter_stratum_id", "construction_batch_id", "construction_batch_index", "case_slot", "base_seed_sha256", "construction_attempt", "lineage_group_id", "n", "r", "H_rows", "public_h_sha256", "row_space_sha256", "validation", "evaluator_only_provenance", "protected_record_sha256", "split"}
+    for rec in records:
+        if not isinstance(rec, dict):
+            raise V2Error("record must be object")
+        if set(rec.keys()) - allowed_record:
+            raise V2Error("unknown record fields")
     assign_splits(records, full=full)
     raw_hashes: Dict[str, str] = {}; row_hashes: Dict[str, str] = {}; lineages: Dict[str, List[Dict[str, Any]]] = {}
     for expected, rec in zip(records, payload["records"]):
@@ -836,7 +914,7 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
         H = BinaryMatrix.from_row_strings(rec["H_rows"])
         family = _family_for(rec["parameter_stratum_id"])
         if rec["family_id"] != family: raise V2Error("family mismatch")
-        if rec["case_id"] != case_id(family, rec["parameter_stratum_id"], rec["construction_batch_id"], rec["case_slot"]): raise V2Error("case ID mismatch")
+        if rec["case_id"] != case_id(family, rec["parameter_stratum_id"], rec.get("construction_batch_id"), rec["case_slot"]): raise V2Error("case ID mismatch")
         if rec["lineage_group_id"] != lineage_group_id(family, rec["parameter_stratum_id"], rec["construction_batch_id"]): raise V2Error("lineage mismatch")
         if rec["configuration_digest"] != config_digest(): raise V2Error("configuration digest mismatch")
         if rec["public_h_sha256"] != public_h_sha256(H) or rec["row_space_sha256"] != row_space_sha256(H): raise V2Error("hash mismatch")
@@ -849,11 +927,11 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
         validation = validate_matrix(H, rec["parameter_stratum_id"], rec["r"], rec.get("validation", {}).get("small_circuit", {}).get("cap", 0), False)
         if validation != rec["validation"]:
             raise V2Error("validation metadata mismatch")
-        regenerated = build_record(rec["parameter_stratum_id"], rec["construction_batch_id"], rec["case_slot"], rec["validation"]["small_circuit"]["cap"])
+        regenerated = build_record(rec["parameter_stratum_id"], rec["construction_batch_index"], rec["case_slot"], rec["validation"]["small_circuit"]["cap"])
         regenerated["split"] = rec["split"]
         if protected_without_digest(regenerated) != protected_without_digest(rec):
             raise V2Error("regenerated protected record mismatch")
-        if rec["protected_record_sha256"] != _digest(("protected_record", protected_without_digest(rec))):
+        if rec["protected_record_sha256"] != json_digest("protected_record", protected_without_digest(rec)):
             raise V2Error("protected record digest mismatch")
         lineages.setdefault(rec["lineage_group_id"], []).append(rec)
     if any(len(v) != 2 for v in lineages.values()):
@@ -872,18 +950,18 @@ def final_eval_commitment(index: int, seed_bytes: bytes) -> str:
     require_uint(index, "index")
     if not isinstance(seed_bytes, bytes) or len(seed_bytes) != 16:
         raise V2Error("final-evaluation seed must be 16 bytes")
-    return _digest(("final_eval_seed_commitment", PROTOCOL_ID, index, seed_bytes))
+    return typed_digest(("final_eval_seed_commitment", PROTOCOL_ID, index, seed_bytes))
 
 
 def verify_final_eval_commitment(index: int, seed_hex: str, commitment: str) -> bool:
     return final_eval_commitment(index, bytes.fromhex(seed_hex)) == commitment
 
-EXPECTED_TEST_VECTOR_DIGEST = "ccb3b7ebdd8309959cf6a1c87e04efab8c466259a3a89344676bf4a9b507faa2"
+EXPECTED_TEST_VECTOR_DIGEST = "615807fe0a63a11441a4bb22e672ed235edbd8d9e1d85b84933676f1cce1a34f"
 EXPECTED_TEST_VECTORS: Dict[str, Any] = {'configuration_digest': 'f33579c66db1b709eec666fb395fb9ecb889a482369d797ad6f19486a0111f65',
- 'dense_R0': '2d611dcaf8c9e25cd34590db0f258797e194b622126f54171f21386c4c2442e7',
- 'dense_R1': '2f83771fff11f20c30a786b530df7ba856bedff684fd10dc8e95a4666083ba49',
- 'dense_context_encoding': '540000000b5300000023726c6d772d682d6e61746976652d72657365617263682d76322d72616e646f6d2d76315300000021682d6e61746976652d72657365617263682d76322d63616e6469646174652d76315300000022726c6d772d72657365617263682d636f727075732d76322d746f6f6c696e672d7632530000001764656e73655f66756c6c5f72616e6b5f686173685f7631530000001164656e73652d6e39362d7234382d70353054000000025300000015636f6e737472756374696f6e5f62617463685f6964490000000100490000000100420000001d726c6d772d682d6e61746976652d76322d63616e6469646174652d763149000000010054000000035300000005636f6f7264490000000100490000000100530000000b64656e73655f656e747279',
- 'dense_expand_48': '2d611dcaf8c9e25cd34590db0f258797e194b622126f54171f21386c4c2442e72f83771fff11f20c30a786b530df7ba8',
+ 'dense_R0': 'd7211073d74dacb57744f485718ef0708ae37d1f6ca22c824d1deed909850187',
+ 'dense_R1': '1a9b1fa4c613abb0c693ad2806477ac3dff8b91e8908289169bf59c48f790b12',
+ 'dense_context_encoding': '540000000b5300000023726c6d772d682d6e61746976652d72657365617263682d76322d72616e646f6d2d76315300000021682d6e61746976652d72657365617263682d76322d63616e6469646174652d76315300000022726c6d772d72657365617263682d636f727075732d76322d746f6f6c696e672d7632530000001764656e73655f66756c6c5f72616e6b5f686173685f7631530000001164656e73652d6e39362d7234382d703530530000001e726c6d772d76322d63616e6469646174652d62617463682d303030303030490000000100420000001d726c6d772d682d6e61746976652d76322d63616e6469646174652d763149000000010054000000035300000005636f6f7264490000000100490000000100530000000b64656e73655f656e747279',
+ 'dense_expand_48': 'd7211073d74dacb57744f485718ef0708ae37d1f6ca22c824d1deed9098501871a9b1fa4c613abb0c693ad2806477ac3',
  'dummy_final_commit_0': 'f626b61a1b53946d6f04d090ae8dae4b568e41a745b8287a29d7a9dfa414a54e',
  'enc_binary_matrix': '4d00000002000000035200000003a0520000000360',
  'enc_binary_row': '5200000009b180',
@@ -894,11 +972,11 @@ EXPECTED_TEST_VECTORS: Dict[str, Any] = {'configuration_digest': 'f33579c66db1b7
  'enc_string_e_acute': '5300000002c3a9',
  'enc_tuple_coord': '54000000035300000005636f6f7264490000000101490000000102',
  'public_h_sha256_fixture': '73807c6412c4f609e313b953e1827ec528af9cc6a87cb944a0b3ba9e8a2716ba',
- 'rejection_attempt_1': '0068683f9b44c67c56f43229941b4a11eb1fee405a7fc9e3752c591ccafc4850',
+ 'rejection_attempt_1': '91220294f14a01800f0aaad300cca584ccc652ef3a57270afa8d041236823a7f',
  'row_space_sha256_fixture': 'ebe911625f0229265ee92939591d6339cdcfc32099d8fb00b08519e55a85aa70',
- 'sparse_priority': '728635d6bb1b2dbc2c2b440425b5f41093b247ee4479794c627e42d431e7f818',
- 'threshold_fit_seed_0': '2e0afea0780958e51e2f3294b1a6cfa9',
- 'tier_validation_seed_0': 'a67ef0fba9f9e90a6a3a87b2a255f5aa'}
+ 'sparse_priority': 'e742dc4f56645f9da60e93fa2010b15cb737939b2fdc05124a0c46467986dab2',
+ 'threshold_fit_seed_0': '89371f5bb32d830de861247354897b67',
+ 'tier_validation_seed_0': '0b62e847455257f4601d4a037906431d'}
 
 def computed_test_vectors() -> Dict[str, Any]:
     row = BinaryRow((1, 0, 1, 1, 0, 0, 0, 1, 1))
@@ -1024,7 +1102,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 splits[rec.get("split", "?")] = splits.get(rec.get("split", "?"), 0) + 1
             print(json.dumps({"records": len(payload.get("records", [])), "strata": counts, "splits": splits, "digest": payload.get("candidate_manifest_digest")}, sort_keys=True)); return 0
         if args.cmd == "sparse-feasibility": print(json.dumps(sparse_feasibility_report(), sort_keys=True)); return 0
-    except (V2Error, OSError, json.JSONDecodeError, TypeError) as exc:
+    except (V2Error, OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return 2

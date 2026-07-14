@@ -71,7 +71,7 @@ class V2CandidateToolingTests(unittest.TestCase):
 
     def _tampered(self, fn):
         bad = copy.deepcopy(self.manifest); fn(bad)
-        bad["candidate_manifest_digest"] = v2._digest(("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"}))
+        bad["candidate_manifest_digest"] = v2.json_digest("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"})
         return bad
 
     def test_manifest_rejects_tampering(self):
@@ -88,7 +88,7 @@ class V2CandidateToolingTests(unittest.TestCase):
             with self.assertRaises(v2.V2Error): v2.validate_manifest(self._tampered(fn))
         bad = copy.deepcopy(self.manifest)
         bad["records"][0]["H_rows"][0] = "x" + bad["records"][0]["H_rows"][0][1:]
-        bad["candidate_manifest_digest"] = v2._digest(("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"}))
+        bad["candidate_manifest_digest"] = v2.json_digest("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"})
         with self.assertRaises(v2.V2Error): v2.validate_manifest(bad)
         bad = copy.deepcopy(self.manifest)
         bad["candidate_manifest_digest"] = "00"*32
@@ -101,8 +101,8 @@ class V2CandidateToolingTests(unittest.TestCase):
         H = v2.BinaryMatrix.from_row_strings(bad["records"][1]["H_rows"])
         bad["records"][1]["public_h_sha256"] = v2.public_h_sha256(H)
         bad["records"][1]["row_space_sha256"] = v2.row_space_sha256(H)
-        bad["records"][1]["protected_record_sha256"] = v2._digest(("protected_record", v2.protected_without_digest(bad["records"][1])))
-        bad["candidate_manifest_digest"] = v2._digest(("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"}))
+        bad["records"][1]["protected_record_sha256"] = v2.json_digest("protected_record", v2.protected_without_digest(bad["records"][1]))
+        bad["candidate_manifest_digest"] = v2.json_digest("candidate_manifest_digest", {k: vv for k, vv in bad.items() if k != "candidate_manifest_digest"})
         with self.assertRaises(v2.V2Error): v2.validate_manifest(bad)
 
     def test_cli_smoke_generation_validation_summary(self):
@@ -120,6 +120,70 @@ class V2CandidateToolingTests(unittest.TestCase):
         commit = v2.final_eval_commitment(0, v2.DUMMY_FINAL_EVAL_SEEDS[0])
         self.assertEqual(commit, v2.EXPECTED_TEST_VECTORS["dummy_final_commit_0"])
         self.assertTrue(v2.verify_final_eval_commitment(0, v2.DUMMY_FINAL_EVAL_SEEDS[0].hex(), commit))
+
+    def test_random_control_exact_enumeration_replay(self):
+        expected = {"ctrl-random-k8-n24": (8, 255), "ctrl-random-k10-n32": (10, 1023)}
+        for stratum, (k, count) in expected.items():
+            for slot in (0, 1):
+                H, prov = v2.generate_control(stratum, slot)
+                cert = prov["certificate"]
+                self.assertEqual(cert["status"], "CERTIFIED_EXACT_DISTANCE")
+                self.assertEqual(cert["kernel_dimension"], k)
+                self.assertEqual(cert["enumerated_nonzero_coefficients"], count)
+                self.assertEqual(cert, v2.replay_control_certificate(H, stratum))
+
+    def test_planted_lineage_pair_is_transform_orbit(self):
+        for stratum in ("planted-dense-n96-r48-w10", "planted-sparse-n120-r60-w10"):
+            r0 = v2.build_record(stratum, 0, 0)
+            r1 = v2.build_record(stratum, 0, 1)
+            p0 = r0["evaluator_only_provenance"]; p1 = r1["evaluator_only_provenance"]
+            self.assertEqual(p0["base_candidate_digest"], p1["base_candidate_digest"])
+            self.assertEqual(p0["base_witness_support"], p1["base_witness_support"])
+            self.assertNotEqual(r0["public_h_sha256"], r1["public_h_sha256"])
+            H1 = v2.BinaryMatrix.from_row_strings(r1["H_rows"])
+            v2.validate_planted_witness(H1, p1["planted_witness_support"])
+
+    def test_audit_matches_bruteforce_on_small_matrices(self):
+        def brute(H, cap):
+            cols = [[row[j] for row in H.as_lists()] for j in range(H.ncols)]
+            for w in range(1, cap + 1):
+                for comb in __import__('itertools').combinations(range(H.ncols), w):
+                    acc = [0] * len(H.rows)
+                    for j in comb:
+                        acc = [a ^ b for a, b in zip(acc, cols[j])]
+                    if not any(acc):
+                        return ("FOUND_WITNESS", w)
+            return ("PASS", None)
+        for n in range(3, 8):
+            for r in range(2, min(5, n) + 1):
+                rows = [[((i * 17 + j * 11 + n * 5 + r) >> (j % 3)) & 1 for j in range(n)] for i in range(r)]
+                H = v2.BinaryMatrix.from_rows(rows)
+                for cap in range(1, 7):
+                    got = v2.small_circuit_audit(H, cap)
+                    exp_status, exp_w = brute(H, cap)
+                    self.assertEqual(got["status"], exp_status)
+                    if exp_w is not None: self.assertLessEqual(got["weight"], cap)
+
+    def test_json_digest_type_distinctions(self):
+        self.assertNotEqual(v2.json_digest("x", {"v": True}), v2.json_digest("x", {"v": "true"}))
+        self.assertNotEqual(v2.json_digest("x", {"v": None}), v2.json_digest("x", {"v": "__NONE__"}))
+
+    def test_full_layout_planner_synthetic(self):
+        records = []
+        for stratum in v2.CONTROL_STRATA:
+            fam = v2._family_for(stratum); lin = v2.lineage_group_id(fam, stratum, 0)
+            for slot in (0,1): records.append({"parameter_stratum_id":stratum,"lineage_group_id":lin})
+        for table, groups in ((v2.DENSE_STRATA,9),(v2.SPARSE_STRATA,9),(v2.PLANTED_DENSE_STRATA,4),(v2.PLANTED_SPARSE_STRATA,4)):
+            for stratum in table:
+                fam=v2._family_for(stratum)
+                for b in range(groups):
+                    lin=v2.lineage_group_id(fam,stratum,b)
+                    for slot in (0,1): records.append({"parameter_stratum_id":stratum,"lineage_group_id":lin})
+        v2.assign_splits(records, full=True)
+        self.assertEqual(len(records), 192)
+        totals = {"train":0,"validation":0,"test":0}
+        for rec in records: totals[rec["split"]]+=1
+        self.assertEqual(totals, {"train":104,"validation":44,"test":44})
 
 if __name__ == "__main__":
     unittest.main()
