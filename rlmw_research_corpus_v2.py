@@ -361,7 +361,7 @@ def _dense_control(stratum: str) -> BinaryMatrix:
     raise V2Error(f"failed to generate dense control {stratum}")
 
 
-def generate_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000) -> Tuple[BinaryMatrix, int]:
+def generate_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, int, Dict[str, Any]]:
     n, r, p, _ = DENSE_STRATA[stratum]
     threshold = int(math.floor(p * (1 << 64)))
     for attempt in range(require_uint(max_attempts, "max_attempts")):
@@ -375,8 +375,12 @@ def generate_dense(stratum: str, construction_batch_id: int, case_slot: int, max
         H = BinaryMatrix.from_rows(rows)
         try:
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
-            return H, attempt
+            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+            if ok:
+                return H, attempt, audit
         except V2Error:
+            if profile == "accepted" and audit_cap:
+                raise
             continue
     raise V2Error(f"dense stratum {stratum} exhausted {max_attempts} attempts")
 
@@ -441,7 +445,7 @@ def _edges_to_matrix(edges: Iterable[Tuple[int, int]], r: int, n: int) -> Binary
     return BinaryMatrix.from_rows(rows)
 
 
-def generate_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS) -> Tuple[BinaryMatrix, int]:
+def generate_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, int, Dict[str, Any]]:
     n, r, dv, dc = SPARSE_STRATA[stratum]
     if dv != 3 or dc != 6 or n * dv != r * dc:
         raise V2Error("unsupported sparse degree contract")
@@ -451,8 +455,12 @@ def generate_sparse(stratum: str, construction_batch_id: int, case_slot: int, ma
             continue
         try:
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
-            return H, attempt
+            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+            if ok:
+                return H, attempt, audit
         except V2Error:
+            if profile == "accepted" and audit_cap:
+                raise
             continue
     raise V2Error(f"{stratum} failed within max_attempts={max_attempts}")
 
@@ -469,7 +477,7 @@ def _witness_support(stratum: str, n: int, weight: int, batch: int, slot: int, a
     return sorted(_ranked_indices(n, "planted_witness_v1", stratum, batch, slot, attempt, "planted_witness_coordinate")[:weight])
 
 
-def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any]]:
+def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
     n, r, wp = PLANTED_DENSE_STRATA[stratum]
     for attempt in range(max_attempts):
         supp = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
@@ -492,6 +500,9 @@ def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: 
         try:
             validate_planted_witness(H, supp, wp)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
+            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+            if not ok:
+                continue
             base_digest = public_h_sha256(H)
             base_support = list(supp)
             H, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
@@ -499,7 +510,9 @@ def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: 
             transform["base_witness_support"] = base_support
             supp2 = [transform["coordinate_permutation_inverse"][i] for i in supp] if transform.get("coordinate_permutation_inverse") else supp
             validate_planted_witness(H, supp2, wp)
-            return H, sorted(supp2), attempt, transform
+            transform["base_audit"] = audit
+            transform["base_accepted_attempt"] = attempt
+            return H, sorted(supp2), attempt, transform, audit
         except V2Error:
             continue
     raise V2Error(f"planted dense {stratum} exhausted attempts")
@@ -530,7 +543,7 @@ def _apply_planted_transform(H: BinaryMatrix, stratum: str, batch: int, slot: in
     return BinaryMatrix.from_rows(rows), {"variant": variant, "coordinate_permutation": perm, "coordinate_permutation_inverse": inv, "row_operations": row_operations}
 
 
-def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any]]:
+def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
     n, r, wp = PLANTED_SPARSE_STRATA[stratum]
     for attempt in range(max_attempts):
         support = _witness_support(stratum, n, wp, construction_batch_id, 0, attempt)
@@ -551,6 +564,9 @@ def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot:
         try:
             validate_planted_witness(H, support, wp)
             validate_matrix(H, stratum, expected_rank=r, small_circuit_cap=0, require_audit_pass=False)
+            ok, audit = _audit_gate(H, audit_cap, profile, audit_resource_limit_entries)
+            if not ok:
+                continue
             base_digest = public_h_sha256(H)
             base_support = list(support)
             H2, transform = _apply_planted_transform(H, stratum, construction_batch_id, case_slot, attempt)
@@ -558,7 +574,9 @@ def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot:
             transform["base_witness_support"] = base_support
             support2 = [transform["coordinate_permutation_inverse"][i] for i in support] if transform.get("coordinate_permutation_inverse") else support
             validate_planted_witness(H2, support2, wp)
-            return H2, sorted(support2), attempt, {**transform, "witness_check_set": chosen_checks}
+            transform["base_audit"] = audit
+            transform["base_accepted_attempt"] = attempt
+            return H2, sorted(support2), attempt, {**transform, "witness_check_set": chosen_checks}, audit
         except V2Error:
             continue
     raise V2Error(f"{stratum} failed within max_attempts={max_attempts}")
@@ -789,20 +807,34 @@ def structural_status_from_audit(audit: Mapping[str, Any], audit_cap: int, profi
 def _is_audit_applicable(stratum: str) -> bool:
     return stratum in DENSE_STRATA or stratum in SPARSE_STRATA or stratum in PLANTED_DENSE_STRATA or stratum in PLANTED_SPARSE_STRATA
 
+def _audit_gate(H: BinaryMatrix, audit_cap: int, profile: str, audit_resource_limit_entries: int) -> Tuple[bool, Dict[str, Any]]:
+    if audit_cap == 0:
+        return True, {"status": "NOT_RUN", "cap": 0}
+    audit = small_circuit_audit(H, audit_cap, resource_limit_entries=audit_resource_limit_entries)
+    if audit["status"] == "PASS":
+        return True, audit
+    if audit["status"] == "FOUND_WITNESS":
+        return False, audit
+    if audit["status"] == "RESOURCE_LIMIT":
+        if profile == "accepted":
+            raise V2Error("accepted generation hit small-circuit audit resource limit")
+        return True, audit
+    raise V2Error(f"unknown audit status {audit.get('status')}")
+
 def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Dict[str, Any]:
     family = _family_for(stratum)
-    witness = None; provenance: Dict[str, Any] = {}; attempt = 0
+    witness = None; provenance: Dict[str, Any] = {}; attempt = 0; audit_override: Optional[Dict[str, Any]] = None
     if stratum in DENSE_STRATA:
-        H, attempt = generate_dense(stratum, batch, slot)
+        H, attempt, audit_override = generate_dense(stratum, batch, slot, audit_cap=audit_cap, profile=profile, audit_resource_limit_entries=audit_resource_limit_entries)
         expected_rank = DENSE_STRATA[stratum][1]
     elif stratum in SPARSE_STRATA:
-        H, attempt = generate_sparse(stratum, batch, slot)
+        H, attempt, audit_override = generate_sparse(stratum, batch, slot, audit_cap=audit_cap, profile=profile, audit_resource_limit_entries=audit_resource_limit_entries)
         expected_rank = SPARSE_STRATA[stratum][1]
     elif stratum in PLANTED_DENSE_STRATA:
-        H, witness, attempt, provenance = generate_planted_dense(stratum, batch, slot)
+        H, witness, attempt, provenance, audit_override = generate_planted_dense(stratum, batch, slot, audit_cap=audit_cap, profile=profile, audit_resource_limit_entries=audit_resource_limit_entries)
         expected_rank = PLANTED_DENSE_STRATA[stratum][1]
     elif stratum in PLANTED_SPARSE_STRATA:
-        H, witness, attempt, provenance = generate_planted_sparse(stratum, batch, slot)
+        H, witness, attempt, provenance, audit_override = generate_planted_sparse(stratum, batch, slot, audit_cap=audit_cap, profile=profile, audit_resource_limit_entries=audit_resource_limit_entries)
         expected_rank = PLANTED_SPARSE_STRATA[stratum][1]
     elif stratum in CONTROL_STRATA:
         H, provenance = generate_control(stratum, slot)
@@ -811,7 +843,11 @@ def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0, profil
         raise V2Error(f"unknown stratum {stratum}")
     if witness is not None:
         validate_planted_witness(H, witness)
-    validation = validate_matrix(H, stratum, expected_rank, audit_cap, require_audit_pass=False, audit_resource_limit_entries=audit_resource_limit_entries)
+    validation = validate_matrix(H, stratum, expected_rank, 0, require_audit_pass=False, audit_resource_limit_entries=audit_resource_limit_entries)
+    if audit_override is not None:
+        validation["small_circuit"] = audit_override
+    elif audit_cap:
+        validation["small_circuit"] = small_circuit_audit(H, audit_cap, resource_limit_entries=audit_resource_limit_entries)
     if _is_audit_applicable(stratum):
         structural_status, calibration_ready = structural_status_from_audit(validation["small_circuit"], audit_cap, profile)
         if profile == "accepted" and structural_status != STRUCTURALLY_ACCEPTED:
@@ -905,7 +941,7 @@ def canonical_json(obj: Any) -> bytes:
 def build_manifest(records: List[Dict[str, Any]], full: bool = False, profile: str = "preaudit") -> Dict[str, Any]:
     recs = copy.deepcopy(records)
     assign_splits(recs, full=full)
-    calibration_ready = profile == "accepted" and all(r.get("calibration_ready") is True and r.get("structural_status") == STRUCTURALLY_ACCEPTED for r in recs)
+    calibration_ready = profile == "accepted" and full and all(r.get("calibration_ready") is True and r.get("structural_status") == STRUCTURALLY_ACCEPTED for r in recs)
     payload = {"protocol_id": PROTOCOL_ID, "generator_id": GENERATOR_ID, "manifest_kind": "candidate_pool_manifest", "generation_profile": profile, "calibration_ready": calibration_ready, "is_frozen_v2_manifest": False, "source_commit": _source_commit(), "configuration_digest": config_digest(), "records": recs}
     payload["candidate_manifest_digest"] = json_digest("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"})
     return payload
@@ -915,6 +951,12 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
     canonical_json(payload)  # rejects NaN/Infinity
     if payload.get("protocol_id") != PROTOCOL_ID or payload.get("generator_id") != GENERATOR_ID:
         raise V2Error("bad protocol/generator")
+    if payload.get("manifest_kind") != "candidate_pool_manifest":
+        raise V2Error("bad manifest kind")
+    if payload.get("generation_profile") not in ("preaudit", "accepted"):
+        raise V2Error("bad generation profile")
+    if payload.get("configuration_digest") != config_digest():
+        raise V2Error("top-level configuration digest mismatch")
     if payload.get("is_frozen_v2_manifest") is not False:
         raise V2Error("candidate pool must not be marked frozen")
     expected_digest = json_digest("candidate_manifest_digest", {k: v for k, v in payload.items() if k != "candidate_manifest_digest"})
@@ -939,6 +981,8 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
             raise V2Error("deterministic split mismatch")
         H = BinaryMatrix.from_row_strings(rec["H_rows"])
         family = _family_for(rec["parameter_stratum_id"])
+        if rec.get("generation_profile") != payload.get("generation_profile"):
+            raise V2Error("record generation profile mismatch")
         if rec["family_id"] != family: raise V2Error("family mismatch")
         if rec["case_id"] != case_id(family, rec["parameter_stratum_id"], rec.get("construction_batch_id"), rec["case_slot"]): raise V2Error("case ID mismatch")
         if rec["lineage_group_id"] != lineage_group_id(family, rec["parameter_stratum_id"], rec["construction_batch_id"]): raise V2Error("lineage mismatch")
@@ -962,12 +1006,14 @@ def validate_manifest(payload: Mapping[str, Any], full: bool = False) -> None:
         lineages.setdefault(rec["lineage_group_id"], []).append(rec)
     if any(len(v) != 2 for v in lineages.values()):
         raise V2Error("lineage group size mismatch")
+    derived_calibration_ready = payload.get("generation_profile") == "accepted" and full and all(r.get("calibration_ready") is True and r.get("structural_status") == STRUCTURALLY_ACCEPTED for r in payload["records"])
+    if payload.get("calibration_ready") is not derived_calibration_ready:
+        raise V2Error("manifest calibration_ready mismatch")
     if payload.get("generation_profile") == "accepted":
         for rec in payload["records"]:
             if _is_audit_applicable(rec["parameter_stratum_id"]) and (rec.get("structural_status") != STRUCTURALLY_ACCEPTED or rec.get("validation", {}).get("small_circuit", {}).get("status") != "PASS" or rec.get("validation", {}).get("small_circuit", {}).get("cap", 0) < HARD_SMALL_CIRCUIT_CAP or rec.get("calibration_ready") is not True):
                 raise V2Error("accepted manifest contains incomplete audit record")
-        if payload.get("calibration_ready") is not True:
-            raise V2Error("accepted manifest is not calibration-ready")
+
 
 
 def calibration_seed(role: str, index: int) -> str:
@@ -1044,11 +1090,11 @@ def verify_test_vectors() -> str:
 def sparse_feasibility_report() -> Dict[str, int]:
     report = {}
     for stratum in SPARSE_STRATA:
-        H, attempt = generate_sparse(stratum, 0, 0)
+        H, attempt, _ = generate_sparse(stratum, 0, 0)
         validate_matrix(H, stratum, SPARSE_STRATA[stratum][1], 0, False)
         report[stratum] = attempt
     for stratum in PLANTED_SPARSE_STRATA:
-        H, support, attempt, _ = generate_planted_sparse(stratum, 0, 0)
+        H, support, attempt, _, _ = generate_planted_sparse(stratum, 0, 0)
         validate_planted_witness(H, support, PLANTED_SPARSE_STRATA[stratum][2])
         validate_matrix(H, stratum, PLANTED_SPARSE_STRATA[stratum][1], 0, False)
         report[stratum] = attempt
@@ -1072,6 +1118,8 @@ def generate_records(full: bool = False, smoke: bool = False, audit_cap: int = 0
         strata = ["ctrl-hamming-m4", "ctrl-ext-hamming-m4"]
         for stratum in strata:
             records += [build_record(stratum, 0, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, 0, 1, audit_cap, profile, audit_resource_limit_entries)]
+        stratum = "dense-n96-r48-p50"
+        records += [build_record(stratum, 0, 0, audit_cap, profile, audit_resource_limit_entries), build_record(stratum, 0, 1, audit_cap, profile, audit_resource_limit_entries)]
         return records
     strata = list(CONTROL_STRATA) if not smoke else ["ctrl-hamming-m4", "ctrl-ext-hamming-m4"]
     for stratum in strata:

@@ -136,7 +136,7 @@ The protocol includes 6 smoke tasks, all 15 full tasks, 2 smoke run specs, and 4
 
 ## Next milestone
 
-This PR specifies the [`h-native-research-v2` construction and calibration protocol design](RESEARCH_CORPUS_V2_DESIGN.md). No v2 generator, manifest, thresholds, case records, calibration results, replicated experiments, or neural/RL evaluation exist yet. PR #59 implements candidate-generation, validation, deterministic test-vector, seed-commitment, and candidate-manifest tooling only. After PR #59 is reviewed and merged, the next separate PR implements the stronger solver-disabled ISD baseline before external generation and calibration. PR C frozen-manifest review, later replicated classical evaluation, and neural/RL evaluation remain deferred to later staged PRs.
+This PR specifies the [`h-native-research-v2` construction and calibration protocol design](RESEARCH_CORPUS_V2_DESIGN.md). No v2 generator, manifest, thresholds, case records, calibration results, replicated experiments, or neural/RL evaluation exist yet. PR #59 implements candidate-generation, validation, deterministic test-vector, seed-commitment, and candidate-manifest tooling only. It distinguishes deterministic pre-audit candidates from structurally accepted candidates; only a complete 192-case accepted layout can become calibration-ready, and later calibration/frozen-corpus artifacts remain separate. After PR #59 is reviewed and merged, the next separate PR implements the stronger solver-disabled ISD baseline before external generation and calibration. PR C frozen-manifest review, later replicated classical evaluation, and neural/RL evaluation remain deferred to later staged PRs.
 
 ## Executable artifacts
 

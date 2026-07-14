@@ -43,7 +43,7 @@ class V2CandidateToolingTests(unittest.TestCase):
             self.assertLess(attempt, v2.MAX_SPARSE_ATTEMPTS)
 
     def test_planted_sparse_witness_is_independently_verified(self):
-        H, support, attempt, _ = v2.generate_planted_sparse("planted-sparse-n120-r60-w10", 0, 0)
+        H, support, attempt, _, _ = v2.generate_planted_sparse("planted-sparse-n120-r60-w10", 0, 0)
         self.assertLess(attempt, v2.MAX_SPARSE_ATTEMPTS)
         v2.validate_planted_witness(H, support, 10)
         v2.validate_matrix(H, "planted-sparse-n120-r60-w10", 60)
@@ -123,6 +123,24 @@ class V2CandidateToolingTests(unittest.TestCase):
         with self.assertRaises(v2.V2Error):
             v2.build_record("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted", audit_resource_limit_entries=1)
 
+    def test_audit_gated_retry_selects_next_attempt(self):
+        calls = []
+        original = v2.small_circuit_audit
+        def fake_audit(H, cap, resource_limit_entries=2_000_000):
+            calls.append(v2.public_h_sha256(H))
+            if len(calls) == 1:
+                return {"status": "FOUND_WITNESS", "cap": cap, "weight": 3, "columns": [0, 1, 2]}
+            return {"status": "PASS", "cap": cap, "estimated_entries": 1}
+        try:
+            v2.small_circuit_audit = fake_audit
+            H, attempt, audit = v2.generate_dense("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted")
+            self.assertEqual(attempt, 1)
+            self.assertEqual(audit["status"], "PASS")
+            H2, attempt2, audit2 = v2.generate_dense("dense-n96-r48-p50", 0, 0, audit_cap=6, profile="accepted")
+            self.assertEqual(attempt2, 0)  # fake audit now immediately passes deterministically for current function state
+        finally:
+            v2.small_circuit_audit = original
+
     def test_manifest_profiles_and_status_tampering(self):
         pre = v2.build_manifest(v2.generate_records(smoke=True), profile="preaudit")
         self.assertFalse(pre["calibration_ready"])
@@ -148,7 +166,7 @@ class V2CandidateToolingTests(unittest.TestCase):
             self.assertFalse(pre_payload["calibration_ready"])
             self.assertEqual(v2.main(["generate-candidate-pool", "--smoke", "--profile", "accepted", "--output-dir", acc]), 0)
             acc_payload = json.loads((Path(acc) / "candidate_pool_manifest.json").read_text())
-            self.assertTrue(acc_payload["calibration_ready"])
+            self.assertFalse(acc_payload["calibration_ready"])
             self.assertEqual(v2.main(["validate-candidate-pool", str(Path(acc) / "candidate_pool_manifest.json")]), 0)
 
     def test_commitments_and_public_seed_vectors(self):
