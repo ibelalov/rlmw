@@ -64,6 +64,23 @@ jobs:
           python rlmw_research_corpus_audit.py summary /tmp/rlmw_research_corpus_audit_a/rlmw_research_corpus_audit.jsonl
           test "$(sha256sum h_native_research_v1_manifest.json | cut -d' ' -f1)" = "909feccf42fa7d0446f7e67f874fc2535806f33273eb0cfc71b8b15c7b9ab351"
 
+
+      - name: V2 candidate tooling smoke
+        run: |
+          python -m py_compile rlmw_research_corpus_v2.py test_rlmw_research_corpus_v2.py
+          python rlmw_research_corpus_v2.py self-test
+          python -m unittest -v test_rlmw_research_corpus_v2.py
+          python -O rlmw_research_corpus_v2.py self-test
+          python -O -m unittest -v test_rlmw_research_corpus_v2.py
+          rm -rf /tmp/rlmw_v2_pool_a /tmp/rlmw_v2_pool_b
+          python rlmw_research_corpus_v2.py generate-candidate-pool --smoke --output-dir /tmp/rlmw_v2_pool_a
+          python rlmw_research_corpus_v2.py generate-candidate-pool --smoke --output-dir /tmp/rlmw_v2_pool_b
+          cmp /tmp/rlmw_v2_pool_a/candidate_pool_manifest.json /tmp/rlmw_v2_pool_b/candidate_pool_manifest.json
+          python rlmw_research_corpus_v2.py validate-candidate-pool /tmp/rlmw_v2_pool_a/candidate_pool_manifest.json
+          python rlmw_research_corpus_v2.py summary /tmp/rlmw_v2_pool_a/candidate_pool_manifest.json
+          git diff --check
+          test -z "$(git ls-files 'candidate_pool_manifest.json' '*v2*manifest*.json' --exclude-standard)"
+
       - name: Research baseline contracts
         run: |
           python -m py_compile rlmw_research_baselines.py test_rlmw_research_baselines.py
