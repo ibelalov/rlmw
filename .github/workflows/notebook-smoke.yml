@@ -85,6 +85,23 @@ jobs:
           git diff --check
           test -z "$(git ls-files 'candidate_pool_manifest.json' '*v2*manifest*.json' --exclude-standard)"
 
+
+      - name: V2 Stern-Dumer ISD contracts
+        run: |
+          python -m py_compile rlmw_research_isd_v2.py test_rlmw_research_isd_v2.py
+          python rlmw_research_isd_v2.py self-test --print-summary
+          python -m unittest -v test_rlmw_research_isd_v2.py
+          python rlmw_research_isd_v2.py list --profile smoke --json >/tmp/rlmw_research_isd_v2_plan.json
+          rm -rf /tmp/rlmw_research_isd_v2_a /tmp/rlmw_research_isd_v2_b
+          python rlmw_research_isd_v2.py run-fixture --profile smoke --output-dir /tmp/rlmw_research_isd_v2_a
+          python rlmw_research_isd_v2.py run-fixture --profile smoke --output-dir /tmp/rlmw_research_isd_v2_b
+          cmp /tmp/rlmw_research_isd_v2_a/rlmw_research_isd_v2_results.jsonl /tmp/rlmw_research_isd_v2_b/rlmw_research_isd_v2_results.jsonl
+          python rlmw_research_isd_v2.py validate /tmp/rlmw_research_isd_v2_a/rlmw_research_isd_v2_results.jsonl --print-summary
+          python -O rlmw_research_isd_v2.py self-test --print-summary
+          python -O -m unittest -v test_rlmw_research_isd_v2.py
+          git diff --check
+          test -z "$(git ls-files 'rlmw_research_isd_v2_results.jsonl' '*isd_v2_results*.jsonl' --exclude-standard)"
+
       - name: Research baseline contracts
         run: |
           python -m py_compile rlmw_research_baselines.py test_rlmw_research_baselines.py
