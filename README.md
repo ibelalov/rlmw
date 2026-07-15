@@ -187,8 +187,6 @@ Generated result JSONL files are not source artifacts and must not be committed.
 ### h-native-research-v2 calibration harness
 
 `rlmw_research_calibration_v2.py` provides the external source-only calibration
-harness for the accepted v2 candidate pool. It plans and validates solver-disabled
-and solver-assisted calibration evidence, fits thresholds, validates tiers, and
-offers deterministic smoke checks without committing generated manifests, JSONL,
+harness for the accepted v2 candidate pool. It implements distinct threshold-fit and tier/reference stages, executes real v2 solver-disabled and CP-SAT-reference adapters, validates shard evidence, fits thresholds, validates tiers, and offers deterministic smoke checks without committing generated manifests, JSONL,
 thresholds, tiers, logs, matrices, or final-evaluation data. See
 `RESEARCH_CALIBRATION_V2.md`.

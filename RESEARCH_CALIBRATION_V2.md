@@ -60,16 +60,18 @@ Generated outputs should be directed outside the repository, for example under
 `/tmp` or controlled external artifact storage.
 
 ```bash
-python rlmw_research_calibration_v2.py plan candidate_pool_manifest.json --output /tmp/rlmw-cal-v2/plan.json
-python rlmw_research_calibration_v2.py run-shard /tmp/rlmw-cal-v2/plan.json --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/shard-000.jsonl
-python rlmw_research_calibration_v2.py validate-results /tmp/rlmw-cal-v2/plan.json /tmp/rlmw-cal-v2/results.jsonl --summary
-python rlmw_research_calibration_v2.py fit-thresholds /tmp/rlmw-cal-v2/plan.json /tmp/rlmw-cal-v2/results.jsonl --output /tmp/rlmw-cal-v2/thresholds.json
-python rlmw_research_calibration_v2.py validate-tiers /tmp/rlmw-cal-v2/plan.json /tmp/rlmw-cal-v2/thresholds.json /tmp/rlmw-cal-v2/results.jsonl --output /tmp/rlmw-cal-v2/tiers.json
+python rlmw_research_calibration_v2.py threshold-fit-plan candidate_pool_manifest.json --output /tmp/rlmw-cal-v2/fit-plan.json
+python rlmw_research_calibration_v2.py run-shard candidate_pool_manifest.json /tmp/rlmw-cal-v2/fit-plan.json --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/fit-shard-000.jsonl
+python rlmw_research_calibration_v2.py validate-results /tmp/rlmw-cal-v2/fit-plan.json /tmp/rlmw-cal-v2/fit-results.jsonl --summary
+python rlmw_research_calibration_v2.py fit-thresholds candidate_pool_manifest.json /tmp/rlmw-cal-v2/fit-plan.json /tmp/rlmw-cal-v2/fit-results.jsonl --output /tmp/rlmw-cal-v2/thresholds.json
+python rlmw_research_calibration_v2.py tier-reference-plan candidate_pool_manifest.json /tmp/rlmw-cal-v2/thresholds.json --output /tmp/rlmw-cal-v2/tier-plan.json
+python rlmw_research_calibration_v2.py run-shard candidate_pool_manifest.json /tmp/rlmw-cal-v2/tier-plan.json --thresholds /tmp/rlmw-cal-v2/thresholds.json --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/tier-shard-000.jsonl
+python rlmw_research_calibration_v2.py validate-tiers candidate_pool_manifest.json /tmp/rlmw-cal-v2/tier-plan.json /tmp/rlmw-cal-v2/thresholds.json /tmp/rlmw-cal-v2/tier-results.jsonl --output /tmp/rlmw-cal-v2/tiers.json
 python rlmw_research_calibration_v2.py summary /tmp/rlmw-cal-v2/tiers.json
 python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw-cal-v2-smoke
 ```
 
-`run-shard` refuses to overwrite an existing shard output. `validate-results`
+The first stage fits thresholds from solver-disabled evidence only; the second stage plans tier-validation and CP-SAT reference runs only from a validated threshold artifact. `run-shard` executes the assigned real v2 adapters and refuses to overwrite an existing shard output. `validate-results`
 detects missing, duplicate, extra, cross-phase, wrong-budget, and wrong-seed
 records against the pre-enumerated plan.
 
