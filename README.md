@@ -136,11 +136,11 @@ The protocol includes 6 smoke tasks, all 15 full tasks, 2 smoke run specs, and 4
 
 ## Next milestone
 
-This PR specifies the [`h-native-research-v2` construction and calibration protocol design](RESEARCH_CORPUS_V2_DESIGN.md). No v2 generator, manifest, thresholds, case records, calibration results, replicated experiments, or neural/RL evaluation exist yet. After this PR is reviewed and merged, the next PR implements candidate-generation, validation, test-vector, seed-commitment, and candidate-manifest tooling only; a subsequent focused PR implements a stronger solver-disabled ISD baseline before external generation and calibration. PR C frozen-manifest review, later replicated classical evaluation, and neural/RL evaluation remain deferred to later staged PRs.
+The [`h-native-research-v2` construction and calibration protocol design](RESEARCH_CORPUS_V2_DESIGN.md) is implemented only through candidate-tooling at this stage. `rlmw_research_corpus_v2.py` provides deterministic candidate-generation and validation tooling, including deterministic pre-audit records and structurally accepted candidate records; only a complete 192-case accepted layout can become calibration-ready. No generated or frozen v2 manifest, calibrated thresholds, calibration results, final-evaluation data, replicated experiments, or neural/RL results exist yet. The next separate PR implements the stronger solver-disabled ISD baseline before external generation and calibration; PR C frozen-manifest review, later replicated classical evaluation, and neural/RL evaluation remain deferred to later staged PRs.
 
 ## Executable artifacts
 
-The primary interactive artifact is `rlmw.ipynb`. The explicitly requested standalone research tools are `rlmw_research_corpus.py` and `rlmw_research_baselines.py`; they provide reproducible manifest and baseline contracts used by CI and Colab. Neural and hybrid-search core logic remains in the notebook.
+The primary interactive artifact is `rlmw.ipynb`. The explicitly requested standalone research tools are `rlmw_research_corpus.py`, `rlmw_research_baselines.py`, and `rlmw_research_corpus_v2.py`; they provide reproducible v1 manifest/baseline contracts and v2 candidate-generation/validation tooling used by CI and Colab. Neural and hybrid-search core logic remains in the notebook.
 
 ## Storage policy
 
