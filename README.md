@@ -183,3 +183,12 @@ Generated result JSONL files are not source artifacts and must not be committed.
 ### Research-corpus small-circuit audit
 
 `rlmw_research_corpus_audit.py` and `RESEARCH_CORPUS_AUDIT.md` add an independently replayable ordered-split subset-XOR audit for the twelve unknown-distance `h-native-research-v1` cases through weight 6. The audit reproduces exact small circuits for `hnrv1-c0012`, `hnrv1-c0013`, `hnrv1-c0020`, `hnrv1-c0022`, and `hnrv1-c0023`, and lower bounds `d>=7` for `hnrv1-c0014` through `hnrv1-c0019` plus `hnrv1-c0021`. These results quarantine v1 as a contract/audit corpus only: it must not support solver-superiority, neural-quality, RL-quality, or benchmark-difficulty claims. The audit and certificate contracts are preserved as historical v1 quarantine conclusions. The [`h-native-research-v2` construction and calibration protocol design](RESEARCH_CORPUS_V2_DESIGN.md) and candidate-tooling layer now exist, and the stronger solver-disabled Stern/Dumer-style collision ISD v2 tooling is standalone infrastructure for the next calibration stage. No generated or frozen v2 manifest, calibrated thresholds, external calibration records, replicated experiments, or neural/RL comparisons exist yet; PR C frozen-manifest review and later evaluations remain deferred to later staged PRs.
+
+### h-native-research-v2 calibration harness
+
+`rlmw_research_calibration_v2.py` provides the external source-only calibration
+harness for the accepted v2 candidate pool. It plans and validates solver-disabled
+and solver-assisted calibration evidence, fits thresholds, validates tiers, and
+offers deterministic smoke checks without committing generated manifests, JSONL,
+thresholds, tiers, logs, matrices, or final-evaluation data. See
+`RESEARCH_CALIBRATION_V2.md`.

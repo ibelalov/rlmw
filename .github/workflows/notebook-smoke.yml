@@ -86,6 +86,21 @@ jobs:
           test -z "$(git ls-files 'candidate_pool_manifest.json' '*v2*manifest*.json' --exclude-standard)"
 
 
+      - name: V2 calibration harness contracts
+        run: |
+          python -m py_compile rlmw_research_calibration_v2.py test_rlmw_research_calibration_v2.py
+          python -m unittest -v test_rlmw_research_calibration_v2.py
+          python -O -m unittest -v test_rlmw_research_calibration_v2.py
+          rm -rf /tmp/rlmw_cal_v2_a /tmp/rlmw_cal_v2_b
+          python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw_cal_v2_a
+          python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw_cal_v2_b
+          cmp /tmp/rlmw_cal_v2_a/thresholds.json /tmp/rlmw_cal_v2_b/thresholds.json
+          cmp /tmp/rlmw_cal_v2_a/tiers.json /tmp/rlmw_cal_v2_b/tiers.json
+          python rlmw_research_calibration_v2.py validate-results /tmp/rlmw_cal_v2_a/plan.json /tmp/rlmw_cal_v2_a/results.jsonl --summary
+          git diff --check
+          test -z "$(git ls-files 'rlmw_calibration_v2_results.jsonl' '*calibration*v2*.jsonl' '*thresholds*.json' '*tiers*.json' --exclude-standard)"
+
+
       - name: V2 Stern-Dumer ISD contracts
         run: |
           python -m py_compile rlmw_research_isd_v2.py test_rlmw_research_isd_v2.py
