@@ -113,5 +113,77 @@ class ISDV2Tests(unittest.TestCase):
             cfg=self.config(); cfg['left_weight']=value
             with self.assertRaises(isd.ISDValidationError): isd.resolved_config(cfg, rank=3)
 
+    def test_observed_singular_retry_with_fake_rng(self):
+        class FakeRng:
+            randbits_calls=0; randbelow_calls=0; sha256_blocks_generated=0
+            def __init__(self): self.calls=0
+            def sample_subset(self,n,k):
+                self.calls += 1
+                return [0,1,2] if self.calls == 1 else [0,1,3]
+        pi=self.public(budget=1)
+        outcome=isd.run_stern_dumer(pi, self.config(), FakeRng())
+        self.assertEqual(outcome.singular_information_sets, 1)
+        self.assertGreaterEqual(outcome.information_sets_accepted, 1)
+
+    def test_actual_duplicate_candidate_accounting_with_repeated_information_set(self):
+        class RepeatRng:
+            randbits_calls=0; randbelow_calls=0; sha256_blocks_generated=0
+            def sample_subset(self,n,k): return [0,1,3]
+        pi=self.public(budget=4)
+        outcome=isd.run_stern_dumer(pi, self.config(information_set_limit=4), RepeatRng())
+        self.assertGreater(outcome.duplicate_candidates, 0)
+
+    def test_phase_seed_cross_pair_rejection(self):
+        with self.assertRaises(isd.ISDValidationError):
+            isd.make_public_input(self.case(), phase='threshold_fit', seed_role='tier_validation_seed', seed_index=0, budget=1)
+        with self.assertRaises(isd.ISDValidationError):
+            isd.make_public_input(self.case(), phase='tier_validation', seed_role='threshold_fit_seed', seed_index=0, budget=1)
+
+    def test_protocol_implementation_source_termination_and_counter_tampering(self):
+        rec=self.record()
+        for key,value in [('candidate_protocol_version','bad'),('implementation_version','bad'),('termination_reason','candidate_budget_exhausted')]:
+            bad=copy.deepcopy(rec); bad[key]=value; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+            with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+        bad=copy.deepcopy(rec); bad['source']['isd_module_sha256']='0'*64; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+        with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad, check_current_source=True)
+        bad=copy.deepcopy(rec); bad['projection_operations']=bad['algorithm_config']['max_projection_operations']+1; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+        with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+
+    def test_resource_cap_boundaries_zero_one_and_cap_plus_one(self):
+        zero=isd.run_record(self.public(budget=4), self.config(max_collision_pairs=0))
+        self.assertEqual(zero['collision_pairs'],0); self.assertEqual(zero['termination_reason'],'resource_limit')
+        isd.validate_result_record(zero)
+        one=isd.run_record(self.public(budget=4), self.config(max_collision_pairs=1))
+        self.assertLessEqual(one['collision_pairs'],1); isd.validate_result_record(one)
+        bad=copy.deepcopy(one); bad['collision_pairs']=bad['algorithm_config']['max_collision_pairs']+1; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+        with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+        proj0=isd.run_record(self.public(budget=4), self.config(max_projection_operations=0))
+        self.assertEqual(proj0['projection_operations'],0); self.assertEqual(proj0['termination_reason'],'resource_limit')
+
+    def test_per_rank_calibration_projection_resolution_and_preflight(self):
+        self.assertEqual(isd.algorithm_config('calibration', rank=3)['projection_bits'],3)
+        self.assertEqual(isd.algorithm_config('calibration', rank=48)['projection_bits'],8)
+        rows=isd.calibration_preflight()
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertGreaterEqual(row['max_candidate_capacity'], max(isd.BUDGET_LADDER))
+
+    def test_w_independent_tier_validation_trajectory(self):
+        low=isd.run_record(self.public(W=2), self.config())
+        high=isd.run_record(self.public(W=10), self.config())
+        for key in ['best_candidate_bits','best_weight','candidate_evaluations','collision_pairs','list_entries_left','list_entries_right','projection_operations']:
+            self.assertEqual(low[key], high[key])
+        self.assertNotEqual(low['threshold_witnesses_seen'], high['threshold_witnesses_seen'])
+
+    def test_missing_unknown_public_input_fields_and_concise_cli_failure(self):
+        pi=self.public(); del pi['case_id']
+        with self.assertRaises(isd.ISDValidationError): isd.run_record(pi,self.config())
+        pi=self.public(); pi['unknown']='x'
+        with self.assertRaises(isd.ISDValidationError): isd.run_record(pi,self.config())
+        import subprocess, sys
+        proc=subprocess.run([sys.executable,'rlmw_research_isd_v2.py','validate','/tmp/does-not-exist'], text=True, capture_output=True)
+        self.assertNotEqual(proc.returncode,0)
+        self.assertLess(len(proc.stderr),2000)
+
 if __name__ == '__main__':
     unittest.main()

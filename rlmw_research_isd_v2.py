@@ -34,6 +34,8 @@ CANDIDATE_GENERATOR_ID = corpus_v2.GENERATOR_ID
 BUDGET_LADDER = (1 << 12, 1 << 14, 1 << 16, 1 << 18)
 SEED_ROLES = ("threshold_fit_seed", "tier_validation_seed")
 PHASES = ("threshold_fit", "tier_validation")
+PHASE_SEED_ROLE = {"threshold_fit": "threshold_fit_seed", "tier_validation": "tier_validation_seed"}
+ALLOWED_TERMINATION_REASONS = {"candidate_budget_exhausted", "information_set_limit_exhausted", "resource_limit", "trivial_code_no_nonzero_word", "search_exhausted_no_more_work"}
 OBSERVATIONAL_FIELDS = {"runtime_s", "environment"}
 
 PROFILE_SPECS: dict[str, dict[str, Any]] = {
@@ -59,12 +61,12 @@ PROFILE_SPECS: dict[str, dict[str, Any]] = {
             "num_threads": 1,
             "left_weight": 2,
             "right_weight": 2,
-            "projection_bits": "min(12,rank)",
+            "projection_bits": "min(8,rank)",
             "information_set_limit": 4096,
             "max_left_list_entries": 200000,
             "max_right_list_entries": 200000,
-            "max_collision_pairs": 2000000,
-            "max_projection_operations": 1000000,
+            "max_collision_pairs": 4000000,
+            "max_projection_operations": 20000000,
             "exhaust_candidate_budget": True,
         },
         "runs": [
@@ -97,6 +99,19 @@ def genuine_int(value: Any, name: str, *, minimum: int | None = None, maximum: i
     if maximum is not None:
         require(value <= maximum, f"{name} must be <= {maximum}")
     return int(value)
+
+def finite_nonnegative_real(value: Any, name: str) -> float:
+    require(isinstance(value, (int, float)) and not isinstance(value, bool), f"{name} must be a finite nonnegative real")
+    number = float(value)
+    require(math.isfinite(number) and number >= 0.0, f"{name} must be a finite nonnegative real")
+    return number
+
+def expected_seed_role(phase: str) -> str:
+    require(phase in PHASES, "unknown phase")
+    return PHASE_SEED_ROLE[phase]
+
+def require_phase_seed_pair(phase: str, seed_role: str) -> None:
+    require(seed_role == expected_seed_role(phase), "phase and seed_role are not the frozen allowed pair")
 
 def canonical_json_bytes(value: Any) -> bytes:
     try:
@@ -235,6 +250,7 @@ def calibration_seed_bytes(role: str, index: int) -> bytes:
 
 def derive_rng_key(*, case_id: str, public_h_hash: str, phase: str, seed_role: str, seed_index: int, budget: int, config_digest: str) -> bytes:
     require(phase in PHASES, "unknown phase")
+    require_phase_seed_pair(phase, seed_role)
     seed = calibration_seed_bytes(seed_role, seed_index)
     material = {
         "protocol_version": PROTOCOL_VERSION,
@@ -258,8 +274,8 @@ def resolved_config(config: dict[str, Any], *, rank: int) -> dict[str, Any]:
     require(out["num_threads"] == THREAD_COUNT, "num_threads must be 1")
     for name in ("left_weight","right_weight","information_set_limit","max_left_list_entries","max_right_list_entries","max_collision_pairs","max_projection_operations"):
         genuine_int(out[name], name, minimum=0)
-    if out["projection_bits"] == "min(12,rank)":
-        out["projection_bits"] = min(12, rank)
+    if out["projection_bits"] == "min(8,rank)":
+        out["projection_bits"] = min(8, rank)
     else:
         genuine_int(out["projection_bits"], "projection_bits", minimum=0)
     require(isinstance(out["exhaust_candidate_budget"], bool), "exhaust_candidate_budget must be boolean")
@@ -336,18 +352,32 @@ def _projection(word: int, parity_coordinates: Sequence[int], ell: int) -> int:
             val |= 1 << i
     return val
 
-def run_stern_dumer(public_input: dict[str, Any], config: dict[str, Any], rng: Sha256CounterRng) -> ISDOutcome:
-    allowed_input = {"case_id","H_rows","public_h_sha256","phase","seed_role","seed_index","budget","candidate_protocol_version","candidate_generator_config_sha256","candidate_manifest_sha256","W"}
-    require(set(public_input) <= allowed_input, "public input contains forbidden/evaluator-only fields")
-    phase = public_input.get("phase")
-    require(phase in PHASES, "invalid phase")
-    W_supplied = "W" in public_input
-    require((phase == "tier_validation") == W_supplied, "W must be supplied only for tier_validation")
-    W = genuine_int(public_input["W"], "W", minimum=0) if W_supplied else None
+def validate_public_input(public_input: dict[str, Any]) -> tuple[list[int], int, int]:
+    required = {"case_id","H_rows","public_h_sha256","phase","seed_role","seed_index","budget","candidate_protocol_version","candidate_generator_config_sha256","candidate_manifest_sha256"}
+    if isinstance(public_input, dict) and public_input.get("phase") == "tier_validation":
+        required = set(required) | {"W"}
+    require(isinstance(public_input, dict), "public input must be an object")
+    require(set(public_input) == required, "public input has missing or unknown fields")
+    require(isinstance(public_input["case_id"], str) and public_input["case_id"], "case_id must be nonempty string")
+    require(public_input["candidate_protocol_version"] == CANDIDATE_PROTOCOL_VERSION, "wrong candidate protocol version")
+    require(is_sha256(public_input["candidate_generator_config_sha256"]), "bad candidate generator digest")
+    require(is_sha256(public_input["candidate_manifest_sha256"]), "bad candidate manifest digest")
+    require(public_input["phase"] in PHASES, "invalid phase")
+    require_phase_seed_pair(public_input["phase"], public_input["seed_role"])
+    genuine_int(public_input["seed_index"], "seed_index", minimum=0, maximum=7)
+    genuine_int(public_input["budget"], "budget", minimum=0)
     rows, n = parse_h_rows(public_input["H_rows"])
     require(public_input["public_h_sha256"] == public_h_sha256(public_input["H_rows"]), "public H hash mismatch")
+    if public_input["phase"] == "tier_validation":
+        genuine_int(public_input["W"], "W", minimum=0)
+    return rows, n, len(rref_bit_rows(rows, n)[0])
+
+def run_stern_dumer(public_input: dict[str, Any], config: dict[str, Any], rng: Sha256CounterRng) -> ISDOutcome:
+    rows, n, rank = validate_public_input(public_input)
+    phase = public_input["phase"]
+    W = public_input.get("W")
     independent, _ = rref_bit_rows(rows, n)
-    rank = len(independent); k = n - rank
+    k = n - rank
     cfg = resolved_config(config, rank=rank)
     budget = genuine_int(public_input["budget"], "budget", minimum=0)
     outcome = ISDOutcome()
@@ -377,23 +407,23 @@ def run_stern_dumer(public_input: dict[str, Any], config: dict[str, Any], rng: S
         for supp in itertools.combinations(left_idx, left_w):
             part = 0
             for idx in supp: part ^= basis[idx]
+            if outcome.projection_operations >= cfg["max_projection_operations"]:
+                outcome.resource_limit_events += 1; outcome.termination_reason = "resource_limit"; break
             key = _projection(part, parity_coords, ell)
             outcome.projection_operations += 1; outcome.list_entries_left += 1
-            if outcome.projection_operations > cfg["max_projection_operations"]:
-                outcome.resource_limit_events += 1; outcome.termination_reason = "resource_limit"; break
             buckets.setdefault(key, []).append((supp, part))
         if outcome.termination_reason == "resource_limit": break
         for rsupp in itertools.combinations(right_idx, right_w):
             rpart = 0
             for idx in rsupp: rpart ^= basis[idx]
+            if outcome.projection_operations >= cfg["max_projection_operations"]:
+                outcome.resource_limit_events += 1; outcome.termination_reason = "resource_limit"; break
             key = _projection(rpart, parity_coords, ell)
             outcome.projection_operations += 1; outcome.list_entries_right += 1; outcome.bucket_probes += 1
-            if outcome.projection_operations > cfg["max_projection_operations"]:
-                outcome.resource_limit_events += 1; outcome.termination_reason = "resource_limit"; break
             for _lsupp, lpart in buckets.get(key, []):
-                outcome.collision_pairs += 1
-                if outcome.collision_pairs > cfg["max_collision_pairs"]:
+                if outcome.collision_pairs >= cfg["max_collision_pairs"]:
                     outcome.skipped_collision_pairs += 1; outcome.resource_limit_events += 1; outcome.termination_reason = "resource_limit"; break
+                outcome.collision_pairs += 1
                 candidate = lpart ^ rpart
                 # Full parity part has already been computed by XORing full systematic basis words;
                 # projected equality is only a bucket filter and never a validity claim.
@@ -415,7 +445,7 @@ def run_stern_dumer(public_input: dict[str, Any], config: dict[str, Any], rng: S
             outcome.termination_reason = "information_set_limit_exhausted"
         else:
             outcome.termination_reason = "search_exhausted_no_more_work"
-    outcome.diagnostics = {"rank": rank, "kernel_dimension": k, "projection_bits_effective": ell, "prng_randbits_calls": rng.randbits_calls, "prng_randbelow_calls": rng.randbelow_calls, "prng_sha256_blocks": rng.sha256_blocks_generated, "collision_algorithm": "stern_dumer_projected_bucket_match"}
+    outcome.diagnostics = {"rank": rank, "kernel_dimension": k, "projection_bits_effective": ell, "prng_randbits_calls": rng.randbits_calls, "prng_randbelow_calls": rng.randbelow_calls, "prng_sha256_blocks": rng.sha256_blocks_generated, "collision_algorithm": "stern_dumer_projected_bucket_match", "max_projection_operations": cfg["max_projection_operations"], "max_collision_pairs": cfg["max_collision_pairs"], "collision_pairs_semantics": "processed_pairs; skipped_collision_pairs counts first unprocessed pair when cap is reached"}
     return outcome
 
 def source_info() -> dict[str, Any]:
@@ -491,7 +521,7 @@ def assemble_record(public_input: dict[str, Any], config: dict[str, Any], outcom
 def make_public_input(case: dict[str, Any], *, phase: str, seed_role: str, seed_index: int, budget: int, W: int | None = None) -> dict[str, Any]:
     require(set(case) <= {"case_id","H_rows","W"}, "fixture/public case contains forbidden keys")
     genuine_int(seed_index, "seed_index", minimum=0, maximum=7); genuine_int(budget, "budget", minimum=0)
-    require(seed_role in SEED_ROLES, "unknown seed role"); require(phase in PHASES, "unknown phase")
+    require(seed_role in SEED_ROLES, "unknown seed role"); require(phase in PHASES, "unknown phase"); require_phase_seed_pair(phase, seed_role)
     pi = {"case_id": case["case_id"], "H_rows": case["H_rows"], "public_h_sha256": public_h_sha256(case["H_rows"]), "phase": phase, "seed_role": seed_role, "seed_index": seed_index, "budget": budget, "candidate_protocol_version": CANDIDATE_PROTOCOL_VERSION, "candidate_generator_config_sha256": corpus_v2.config_digest(), "candidate_manifest_sha256": "0"*64}
     if phase == "tier_validation":
         pi["W"] = genuine_int(W if W is not None else case.get("W"), "W", minimum=0)
@@ -500,7 +530,7 @@ def make_public_input(case: dict[str, Any], *, phase: str, seed_role: str, seed_
     return pi
 
 def run_record(public_input: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    rows, n = parse_h_rows(public_input["H_rows"]); rank = len(rref_bit_rows(rows, n)[0])
+    rows, n, rank = validate_public_input(public_input)
     cfg = resolved_config(config, rank=rank)
     cd = config_digest(cfg)
     key = derive_rng_key(case_id=public_input["case_id"], public_h_hash=public_input["public_h_sha256"], phase=public_input["phase"], seed_role=public_input["seed_role"], seed_index=public_input["seed_index"], budget=public_input["budget"], config_digest=cd)
@@ -517,24 +547,58 @@ def validate_result_record(record: dict[str, Any], *, check_current_source: bool
     require(set(record) == required, "record has missing or unknown fields")
     require(record["result_schema_version"] == RESULT_SCHEMA_VERSION, "wrong result schema")
     require(record["protocol_version"] == PROTOCOL_VERSION and record["algorithm_id"] == ALGORITHM_ID, "wrong protocol/algorithm")
+    require(record["candidate_protocol_version"] == CANDIDATE_PROTOCOL_VERSION, "wrong candidate protocol")
+    require(record["implementation_version"] == IMPLEMENTATION_VERSION, "wrong implementation version")
     require(record["solver_stratum"] == SOLVER_STRATUM and record["num_threads"] == 1, "not solver-disabled single-thread")
     require(record["prng_version"] == PRNG_VERSION, "wrong PRNG")
+    require(isinstance(record["case_id"], str) and record["case_id"], "case_id must be nonempty string")
     require(is_sha256(record["candidate_generator_config_sha256"]) and is_sha256(record["candidate_manifest_sha256"]), "bad candidate digests")
     rows, n = parse_h_rows(record["H_rows"]); require(record["n"] == n, "n mismatch")
     rank = len(rref_bit_rows(rows, n)[0]); require(record["rank"] == rank, "rank mismatch")
     require(record["public_h_sha256"] == public_h_sha256(record["H_rows"]), "public H hash mismatch")
     require(record["phase"] in PHASES and record["seed_role"] in SEED_ROLES, "bad phase/role")
+    require_phase_seed_pair(record["phase"], record["seed_role"])
     genuine_int(record["seed_index"], "seed_index", minimum=0, maximum=7); genuine_int(record["budget"], "budget", minimum=0)
     if record["phase"] == "threshold_fit": require(record["W"] is None and record["threshold_witnesses_seen"] == 0 and record["threshold_hit"] is False, "threshold_fit must not use W")
     else: genuine_int(record["W"], "W", minimum=0)
     cfg = resolved_config(record["algorithm_config"], rank=rank); require(record["algorithm_config_sha256"] == config_digest(cfg), "config digest mismatch")
+    require(record["termination_reason"] in ALLOWED_TERMINATION_REASONS, "unknown termination reason")
+    finite_nonnegative_real(record["runtime_s"], "runtime_s")
+    require(isinstance(record["environment"], dict) and set(record["environment"]) == {"platform"} and isinstance(record["environment"]["platform"], str), "bad environment schema")
+    source = record["source"]
+    require(isinstance(source, dict) and set(source) == {"source_commit", "isd_module_sha256", "python_version"}, "bad source schema")
+    require((source["source_commit"] is None) or (isinstance(source["source_commit"], str) and len(source["source_commit"]) in {40,64} and all(c in "0123456789abcdef" for c in source["source_commit"])), "bad source commit")
+    require(is_sha256(source["isd_module_sha256"]) and isinstance(source["python_version"], str), "bad source hash/version")
     counters = ["information_set_attempts","singular_information_sets","information_sets_accepted","list_entries_left","list_entries_right","projection_operations","bucket_probes","collision_pairs","skipped_collision_pairs","reconstructed_candidates","candidate_evaluations","objective_evaluations","exact_verifications","valid_codewords_seen","threshold_witnesses_seen","duplicate_candidates","resource_limit_events"]
     for c in counters: genuine_int(record[c], c, minimum=0)
     require(record["singular_information_sets"] + record["information_sets_accepted"] <= record["information_set_attempts"], "information-set counters invalid")
+    require(record["information_set_attempts"] <= cfg["information_set_limit"], "information-set limit exceeded")
     require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["reconstructed_candidates"] == record["valid_codewords_seen"], "candidate verification counters diverge")
     require(record["candidate_evaluations"] <= record["budget"], "candidate budget exceeded")
     require(record["duplicate_candidates"] <= record["candidate_evaluations"], "duplicate count invalid")
-    require(record["skipped_collision_pairs"] <= record["collision_pairs"], "skipped collision count invalid")
+    require(record["threshold_witnesses_seen"] <= record["candidate_evaluations"], "threshold witness count invalid")
+    require(record["projection_operations"] <= cfg["max_projection_operations"], "projection cap exceeded")
+    require(record["collision_pairs"] <= cfg["max_collision_pairs"], "collision cap exceeded")
+    require(record["list_entries_left"] <= cfg["max_left_list_entries"] * max(1, record["information_sets_accepted"]), "left list cap exceeded")
+    require(record["list_entries_right"] <= cfg["max_right_list_entries"] * max(1, record["information_sets_accepted"]), "right list cap exceeded")
+    diag = record["diagnostics"]
+    expected_diag = {"rank","kernel_dimension","projection_bits_effective","prng_randbits_calls","prng_randbelow_calls","prng_sha256_blocks","collision_algorithm","max_projection_operations","max_collision_pairs","collision_pairs_semantics"}
+    require(isinstance(diag, dict) and set(diag) == expected_diag, "bad diagnostics schema")
+    require(diag["rank"] == rank and diag["kernel_dimension"] == n-rank and diag["projection_bits_effective"] == min(cfg["projection_bits"], rank), "diagnostic dimension mismatch")
+    require(diag["collision_algorithm"] == "stern_dumer_projected_bucket_match", "wrong diagnostic algorithm")
+    require(diag["max_projection_operations"] == cfg["max_projection_operations"] and diag["max_collision_pairs"] == cfg["max_collision_pairs"], "diagnostic cap mismatch")
+    for d in ("prng_randbits_calls","prng_randbelow_calls","prng_sha256_blocks"): genuine_int(diag[d], d, minimum=0)
+    if record["termination_reason"] == "candidate_budget_exhausted":
+        require(record["candidate_evaluations"] == record["budget"], "candidate-budget termination requires exact budget exhaustion")
+        require(record["resource_limit_events"] == 0, "resource-limit record cannot be relabelled as candidate-budget exhausted")
+    if record["termination_reason"] == "resource_limit":
+        require(record["resource_limit_events"] > 0, "resource_limit termination requires resource event")
+    else:
+        require(record["resource_limit_events"] == 0, "resource event requires resource_limit termination")
+    if record["termination_reason"] == "information_set_limit_exhausted":
+        require(record["information_set_attempts"] == cfg["information_set_limit"] and record["candidate_evaluations"] < record["budget"], "bad information-set-limit termination")
+    if record["termination_reason"] == "trivial_code_no_nonzero_word":
+        require(diag["kernel_dimension"] == 0 and record["candidate_evaluations"] == 0, "bad trivial-code termination")
     if record["best_candidate_bits"] is None:
         require(record["best_candidate_sha256"] is None and record["best_weight"] is None and record["witness_verified"] is False and record["threshold_hit"] is False, "empty incumbent fields inconsistent")
     else:
@@ -543,6 +607,8 @@ def validate_result_record(record: dict[str, Any], *, check_current_source: bool
         word = bits_to_word(bits); wt = verify_nonzero_kernel_word(rows, n, word)
         require(record["best_weight"] == wt and record["witness_verified"] is True, "witness verification mismatch")
         require(record["threshold_hit"] == (record["W"] is not None and wt <= record["W"]), "threshold status mismatch")
+        if record["threshold_hit"]:
+            require(record["threshold_witnesses_seen"] >= 1, "threshold hit requires threshold witness count")
     require(record["reproducible_core_sha256"] == compute_reproducible_core_sha256(record), "reproducible core digest mismatch")
     if check_current_source:
         require(record["source"]["isd_module_sha256"] == sha256_file(Path(__file__)), "module hash mismatch")
@@ -582,6 +648,29 @@ def brute_force_min_weight(row_strings: Sequence[str]) -> int | None:
             wt = word.bit_count(); best = wt if best is None else min(best, wt)
     return best
 
+def calibration_preflight() -> list[dict[str, Any]]:
+    """Cheap structural check that calibration caps can permit budget completion."""
+    representatives = [(96, 48), (128, 64), (160, 80), (192, 96), (240, 120)]
+    rows = []
+    raw = PROFILE_SPECS["calibration"]["algorithm_config"]
+    for n, rank in representatives:
+        k = n - rank
+        cfg = algorithm_config("calibration", rank=rank)
+        left_n = (k + 1) // 2
+        right_n = k // 2
+        left_entries = math.comb(left_n, cfg["left_weight"])
+        right_entries = math.comb(right_n, cfg["right_weight"])
+        projections_per_set = left_entries + right_entries
+        max_sets_by_projection = cfg["max_projection_operations"] // max(1, projections_per_set)
+        accepted_sets = min(cfg["information_set_limit"], max_sets_by_projection)
+        # Projection buckets are filters; cap feasibility is structural, so use the maximum
+        # possible processed collision pairs across accepted sets before projection filtering.
+        max_candidate_capacity = min(cfg["max_collision_pairs"], accepted_sets * left_entries * right_entries)
+        for budget in BUDGET_LADDER:
+            require(max_candidate_capacity >= budget, f"calibration caps cannot permit budget {budget} for n={n}, r={rank}")
+        rows.append({"n": n, "rank": rank, "projection_bits": cfg["projection_bits"], "left_entries": left_entries, "right_entries": right_entries, "accepted_sets_by_projection_cap": accepted_sets, "max_candidate_capacity": max_candidate_capacity})
+    return rows
+
 def self_test() -> dict[str, Any]:
     case = FIXTURE_CASES["isdv2-fixture-hamming7"]
     pi = make_public_input(case, phase="tier_validation", seed_role="tier_validation_seed", seed_index=0, budget=16)
@@ -590,7 +679,8 @@ def self_test() -> dict[str, Any]:
     validate_result_record(first); validate_result_record(second)
     require(canonical_json_bytes(reproducible_core(first)) == canonical_json_bytes(reproducible_core(second)), "self-test replay mismatch")
     require(first["list_entries_left"] > 0 and first["bucket_probes"] > 0 and first["collision_pairs"] > 0, "collision plumbing did not execute")
-    return {"records": 2, "best_weight": first["best_weight"], "collision_pairs": first["collision_pairs"]}
+    preflight = calibration_preflight()
+    return {"records": 2, "best_weight": first["best_weight"], "collision_pairs": first["collision_pairs"], "preflight_cases": len(preflight)}
 
 def cmd_list(args: argparse.Namespace) -> int:
     data = PROFILE_SPECS[args.profile]
@@ -599,8 +689,10 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_run_fixture(args: argparse.Namespace) -> int:
     records = []
-    cfg = algorithm_config(args.profile, rank=0)
     for case in FIXTURE_CASES.values():
+        rows, n = parse_h_rows(case["H_rows"])
+        rank = len(rref_bit_rows(rows, n)[0])
+        cfg = algorithm_config(args.profile, rank=rank)
         for budget in PROFILE_SPECS[args.profile]["budgets"][:1]:
             pi = make_public_input(case, phase="tier_validation", seed_role="tier_validation_seed", seed_index=0, budget=budget)
             record = run_record(pi, cfg)

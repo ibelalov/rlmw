@@ -28,13 +28,13 @@ The algorithm accepts only an opaque case ID, public binary `H_rows` in original
 | profile | budgets | left weight | right weight | projection bits | information-set limit | left/right list caps | collision cap | projection cap |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
 | `smoke` | `8, 16` | 1 | 1 | 2 | 8 | 64 / 64 | 128 | 512 |
-| `calibration` | `2^12, 2^14, 2^16, 2^18` | 2 | 2 | `min(12, rank)` | 4096 | 200000 / 200000 | 2000000 | 1000000 |
+| `calibration` | `2^12, 2^14, 2^16, 2^18` | 2 | 2 | `min(8, rank)` | 4096 | 200000 / 200000 | 4000000 | 20000000 |
 
 All runs use `num_threads = 1` and `exhaust_candidate_budget = true`. Parameters are functions only of the public profile/config and public rank; they are never tuned from family, split, planted, evaluator-only, or calibration-outcome metadata.
 
 ## Seed discipline
 
-Only `threshold_fit_seed[index]` and `tier_validation_seed[index]` for `index in 0..7` are accepted. Seed bytes are obtained from the frozen `rlmw_research_corpus_v2.calibration_seed(role, index)` derivation. Unknown roles, final-evaluation roles, indices outside `0..7`, booleans, floats, strings, or arbitrary replacement seed bytes are rejected. The RNG key binds protocol, algorithm, PRNG version, case ID, public-H hash, phase, role/index, budget, and algorithm-config digest.
+Only exact phase/seed pairs `threshold_fit`/`threshold_fit_seed[index]` and `tier_validation`/`tier_validation_seed[index]` for `index in 0..7` are accepted; cross-pairings are rejected. Seed bytes are obtained from the frozen `rlmw_research_corpus_v2.calibration_seed(role, index)` derivation. Unknown roles, final-evaluation roles, indices outside `0..7`, booleans, floats, strings, or arbitrary replacement seed bytes are rejected. The RNG key binds protocol, algorithm, PRNG version, case ID, public-H hash, phase, role/index, budget, and algorithm-config digest.
 
 ## Algorithm
 
@@ -48,13 +48,13 @@ For every collision pair, the implementation reconstructs the full information v
 
 ## Counters and termination
 
-Records include deterministic counters for information-set attempts, singular/accepted sets, left/right list entries, projection operations, bucket probes, collision pairs, skipped collision pairs, reconstructed candidates, candidate/objective evaluations, exact verifications, valid codewords, threshold witnesses, duplicates, resource-limit events, and PRNG calls/blocks in diagnostics.
+Records include deterministic counters for information-set attempts, singular/accepted sets, left/right list entries, projection operations, bucket probes, processed collision pairs, skipped collision pairs, reconstructed candidates, candidate/objective evaluations, exact verifications, valid codewords, threshold witnesses, duplicates, resource-limit events, and PRNG calls/blocks in diagnostics. Projection operations and processed collision pairs are checked before incrementing, so `max_projection_operations` and `max_collision_pairs` are never exceeded. If a collision cap is already reached, the first unprocessed matching pair increments `skipped_collision_pairs`, raises a resource event, and terminates as `resource_limit`; it is not counted as a processed collision or reconstructed candidate.
 
-Candidate evaluations, objective evaluations, exact verifications, reconstructed candidates, and valid codewords are equal because every reconstructed candidate is fully verified. Duplicates consume budget and exact verification. Bounded exhaustion, missing collisions, singular sets, list caps, operation caps, and resource limits are non-certifying termination states and never imply infeasibility, a lower bound, or optimality.
+Candidate evaluations, objective evaluations, exact verifications, reconstructed candidates, and valid codewords are equal because every reconstructed candidate is fully verified. Duplicates consume budget and exact verification. `candidate_budget_exhausted` requires exact budget exhaustion with no resource event; `resource_limit` requires a resource event; `information_set_limit_exhausted` requires the configured information-set limit with remaining candidate budget. Bounded exhaustion, missing collisions, singular sets, list caps, operation caps, and resource limits are non-certifying termination states and never imply infeasibility, a lower bound, or optimality.
 
 ## Records and CLI
 
-Canonical JSONL records bind source commit/module hash, protocol/schema, candidate protocol/config/manifest digests, case ID, public-H hash, algorithm/config digest, phase, seed role/index, budget, termination, counters, verified incumbent bits/hash/weight, optional `W`, threshold status, and a reproducible-core digest. Validation rejects duplicate JSON keys, noncanonical JSONL, unknown/missing fields, non-finite values, bool/float integer substitutions, counter tampering, witness tampering, digest tampering, solver-assisted fields, and certificate claims.
+Canonical JSONL records bind source commit/module hash, protocol/schema, candidate protocol/config/manifest digests, case ID, public-H hash, algorithm/config digest, phase, seed role/index, budget, termination, counters, verified incumbent bits/hash/weight, optional `W`, threshold status, and a reproducible-core digest. Validation rejects duplicate JSON keys, noncanonical JSONL, unknown/missing fields, non-finite values, bool/float integer substitutions, phase/seed cross-pairings, public-input leakage, invalid source/environment/diagnostics schemas, termination relabelling, counter/resource-cap tampering, witness tampering, digest tampering, solver-assisted fields, and certificate claims. A cheap deterministic calibration preflight covers representative v2 dimensions and every frozen budget without running an expensive calibration search.
 
 Commands:
 
