@@ -175,6 +175,42 @@ class ISDV2Tests(unittest.TestCase):
             self.assertEqual(low[key], high[key])
         self.assertNotEqual(low['threshold_witnesses_seen'], high['threshold_witnesses_seen'])
 
+    def test_strict_integer_and_boolean_field_tampering(self):
+        rec=self.record()
+        for field,value in [('num_threads', True), ('n', float(rec['n'])), ('rank', float(rec['rank'])), ('best_weight', float(rec['best_weight']))]:
+            bad=copy.deepcopy(rec); bad[field]=value; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+            with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+        for field,value in [('witness_verified', 1), ('threshold_hit', 0)]:
+            bad=copy.deepcopy(rec); bad[field]=value; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+            with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+        cfg=self.config(); cfg['exhaust_candidate_budget']=1
+        with self.assertRaises(isd.ISDValidationError): isd.resolved_config(cfg, rank=3)
+
+    def test_all_counter_invariant_tampering_is_rejected(self):
+        rec=self.record()
+        cases=[
+            ('singular_information_sets', rec['singular_information_sets']+1),
+            ('reconstructed_candidates', rec['reconstructed_candidates']+1),
+            ('list_entries_left', rec['list_entries_left']+1),
+            ('bucket_probes', rec['bucket_probes']+1),
+            ('skipped_collision_pairs', 2),
+            ('threshold_witnesses_seen', 0),
+            ('best_candidate_bits', None),
+        ]
+        for field,value in cases:
+            bad=copy.deepcopy(rec); bad[field]=value
+            if field == 'best_candidate_bits':
+                bad['best_candidate_sha256']=None; bad['best_weight']=None; bad['witness_verified']=False
+            bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+            with self.subTest(field=field):
+                with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+
+    def test_strict_source_commit_and_fixture_option(self):
+        rec=self.record()
+        bad=copy.deepcopy(rec); bad['source']['source_commit']=None; bad['reproducible_core_sha256']=isd.compute_reproducible_core_sha256(bad)
+        with self.assertRaises(isd.ISDValidationError): isd.validate_result_record(bad)
+        isd.validate_result_record(bad, allow_missing_source=True)
+
     def test_missing_unknown_public_input_fields_and_concise_cli_failure(self):
         pi=self.public(); del pi['case_id']
         with self.assertRaises(isd.ISDValidationError): isd.run_record(pi,self.config())
@@ -184,6 +220,7 @@ class ISDV2Tests(unittest.TestCase):
         proc=subprocess.run([sys.executable,'rlmw_research_isd_v2.py','validate','/tmp/does-not-exist'], text=True, capture_output=True)
         self.assertNotEqual(proc.returncode,0)
         self.assertLess(len(proc.stderr),2000)
+        self.assertNotIn('Traceback', proc.stderr)
 
 if __name__ == '__main__':
     unittest.main()

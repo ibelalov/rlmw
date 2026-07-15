@@ -100,6 +100,10 @@ def genuine_int(value: Any, name: str, *, minimum: int | None = None, maximum: i
         require(value <= maximum, f"{name} must be <= {maximum}")
     return int(value)
 
+def literal_bool(value: Any, name: str) -> bool:
+    require(isinstance(value, bool), f"{name} must be a literal boolean")
+    return value
+
 def finite_nonnegative_real(value: Any, name: str) -> float:
     require(isinstance(value, (int, float)) and not isinstance(value, bool), f"{name} must be a finite nonnegative real")
     number = float(value)
@@ -271,14 +275,14 @@ def resolved_config(config: dict[str, Any], *, rank: int) -> dict[str, Any]:
     allowed = {"num_threads","left_weight","right_weight","projection_bits","information_set_limit","max_left_list_entries","max_right_list_entries","max_collision_pairs","max_projection_operations","exhaust_candidate_budget"}
     require(set(config) == allowed, "algorithm_config has missing or unknown fields")
     out = dict(config)
-    require(out["num_threads"] == THREAD_COUNT, "num_threads must be 1")
+    genuine_int(out["num_threads"], "num_threads", minimum=THREAD_COUNT, maximum=THREAD_COUNT)
     for name in ("left_weight","right_weight","information_set_limit","max_left_list_entries","max_right_list_entries","max_collision_pairs","max_projection_operations"):
         genuine_int(out[name], name, minimum=0)
     if out["projection_bits"] == "min(8,rank)":
         out["projection_bits"] = min(8, rank)
     else:
         genuine_int(out["projection_bits"], "projection_bits", minimum=0)
-    require(isinstance(out["exhaust_candidate_budget"], bool), "exhaust_candidate_budget must be boolean")
+    literal_bool(out["exhaust_candidate_budget"], "exhaust_candidate_budget")
     return out
 
 def algorithm_config(profile: str = "smoke", overrides: dict[str, Any] | None = None, *, rank: int = 0) -> dict[str, Any]:
@@ -539,7 +543,7 @@ def run_record(public_input: dict[str, Any], config: dict[str, Any]) -> dict[str
 
 REQUIRED_RECORD_KEYS = None
 
-def validate_result_record(record: dict[str, Any], *, check_current_source: bool = False) -> None:
+def validate_result_record(record: dict[str, Any], *, check_current_source: bool = False, allow_missing_source: bool = False) -> None:
     require(isinstance(record, dict), "record must be object")
     forbidden = {"solver_status", "solver_status_raw", "cp_sat_status", "exact_distance", "certified_lower_bound", "optimality_certified"}
     require(not (set(record) & forbidden), "solver-assisted or certificate fields are forbidden")
@@ -549,12 +553,13 @@ def validate_result_record(record: dict[str, Any], *, check_current_source: bool
     require(record["protocol_version"] == PROTOCOL_VERSION and record["algorithm_id"] == ALGORITHM_ID, "wrong protocol/algorithm")
     require(record["candidate_protocol_version"] == CANDIDATE_PROTOCOL_VERSION, "wrong candidate protocol")
     require(record["implementation_version"] == IMPLEMENTATION_VERSION, "wrong implementation version")
-    require(record["solver_stratum"] == SOLVER_STRATUM and record["num_threads"] == 1, "not solver-disabled single-thread")
+    genuine_int(record["num_threads"], "num_threads", minimum=THREAD_COUNT, maximum=THREAD_COUNT)
+    require(record["solver_stratum"] == SOLVER_STRATUM, "not solver-disabled")
     require(record["prng_version"] == PRNG_VERSION, "wrong PRNG")
     require(isinstance(record["case_id"], str) and record["case_id"], "case_id must be nonempty string")
     require(is_sha256(record["candidate_generator_config_sha256"]) and is_sha256(record["candidate_manifest_sha256"]), "bad candidate digests")
-    rows, n = parse_h_rows(record["H_rows"]); require(record["n"] == n, "n mismatch")
-    rank = len(rref_bit_rows(rows, n)[0]); require(record["rank"] == rank, "rank mismatch")
+    rows, n = parse_h_rows(record["H_rows"]); genuine_int(record["n"], "n", minimum=1); require(record["n"] == n, "n mismatch")
+    rank = len(rref_bit_rows(rows, n)[0]); genuine_int(record["rank"], "rank", minimum=0); require(record["rank"] == rank, "rank mismatch")
     require(record["public_h_sha256"] == public_h_sha256(record["H_rows"]), "public H hash mismatch")
     require(record["phase"] in PHASES and record["seed_role"] in SEED_ROLES, "bad phase/role")
     require_phase_seed_pair(record["phase"], record["seed_role"])
@@ -567,13 +572,17 @@ def validate_result_record(record: dict[str, Any], *, check_current_source: bool
     require(isinstance(record["environment"], dict) and set(record["environment"]) == {"platform"} and isinstance(record["environment"]["platform"], str), "bad environment schema")
     source = record["source"]
     require(isinstance(source, dict) and set(source) == {"source_commit", "isd_module_sha256", "python_version"}, "bad source schema")
-    require((source["source_commit"] is None) or (isinstance(source["source_commit"], str) and len(source["source_commit"]) in {40,64} and all(c in "0123456789abcdef" for c in source["source_commit"])), "bad source commit")
+    require((allow_missing_source and source["source_commit"] is None) or (isinstance(source["source_commit"], str) and len(source["source_commit"]) in {40,64} and all(c in "0123456789abcdef" for c in source["source_commit"])), "bad source commit")
     require(is_sha256(source["isd_module_sha256"]) and isinstance(source["python_version"], str), "bad source hash/version")
     counters = ["information_set_attempts","singular_information_sets","information_sets_accepted","list_entries_left","list_entries_right","projection_operations","bucket_probes","collision_pairs","skipped_collision_pairs","reconstructed_candidates","candidate_evaluations","objective_evaluations","exact_verifications","valid_codewords_seen","threshold_witnesses_seen","duplicate_candidates","resource_limit_events"]
     for c in counters: genuine_int(record[c], c, minimum=0)
-    require(record["singular_information_sets"] + record["information_sets_accepted"] <= record["information_set_attempts"], "information-set counters invalid")
+    require(record["singular_information_sets"] + record["information_sets_accepted"] == record["information_set_attempts"], "information-set counters invalid")
     require(record["information_set_attempts"] <= cfg["information_set_limit"], "information-set limit exceeded")
-    require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["reconstructed_candidates"] == record["valid_codewords_seen"], "candidate verification counters diverge")
+    require(record["collision_pairs"] == record["reconstructed_candidates"] == record["candidate_evaluations"], "collision/candidate counters diverge")
+    require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["valid_codewords_seen"], "candidate verification counters diverge")
+    require(record["projection_operations"] == record["list_entries_left"] + record["list_entries_right"], "projection/list counters diverge")
+    require(record["bucket_probes"] == record["list_entries_right"], "bucket probe counter diverges")
+    require(record["skipped_collision_pairs"] in (0, 1), "skipped collision count must be 0 or 1")
     require(record["candidate_evaluations"] <= record["budget"], "candidate budget exceeded")
     require(record["duplicate_candidates"] <= record["candidate_evaluations"], "duplicate count invalid")
     require(record["threshold_witnesses_seen"] <= record["candidate_evaluations"], "threshold witness count invalid")
@@ -595,15 +604,21 @@ def validate_result_record(record: dict[str, Any], *, check_current_source: bool
         require(record["resource_limit_events"] > 0, "resource_limit termination requires resource event")
     else:
         require(record["resource_limit_events"] == 0, "resource event requires resource_limit termination")
+    require((record["skipped_collision_pairs"] == 1) == (record["termination_reason"] == "resource_limit" and record["collision_pairs"] == cfg["max_collision_pairs"]), "skipped collision semantics mismatch")
     if record["termination_reason"] == "information_set_limit_exhausted":
         require(record["information_set_attempts"] == cfg["information_set_limit"] and record["candidate_evaluations"] < record["budget"], "bad information-set-limit termination")
     if record["termination_reason"] == "trivial_code_no_nonzero_word":
         require(diag["kernel_dimension"] == 0 and record["candidate_evaluations"] == 0, "bad trivial-code termination")
+    literal_bool(record["witness_verified"], "witness_verified")
+    literal_bool(record["threshold_hit"], "threshold_hit")
+    require((record["threshold_witnesses_seen"] > 0) == record["threshold_hit"], "threshold witness count/status mismatch")
+    require((record["candidate_evaluations"] > 0) == (record["best_candidate_bits"] is not None), "candidate/incumbent existence mismatch")
     if record["best_candidate_bits"] is None:
         require(record["best_candidate_sha256"] is None and record["best_weight"] is None and record["witness_verified"] is False and record["threshold_hit"] is False, "empty incumbent fields inconsistent")
     else:
         bits = record["best_candidate_bits"]; require(len(bits) == n, "candidate length mismatch")
         require(record["best_candidate_sha256"] == sha256_object({"candidate_bits": bits}), "candidate hash mismatch")
+        genuine_int(record["best_weight"], "best_weight", minimum=1, maximum=n)
         word = bits_to_word(bits); wt = verify_nonzero_kernel_word(rows, n, word)
         require(record["best_weight"] == wt and record["witness_verified"] is True, "witness verification mismatch")
         require(record["threshold_hit"] == (record["W"] is not None and wt <= record["W"]), "threshold status mismatch")
@@ -620,7 +635,7 @@ class RejectDuplicateKeys(dict):
             if k in self: fail(f"duplicate JSON object key {k!r}")
             self[k] = v
 
-def read_validate_jsonl(path: Path, *, check_current_source: bool = False) -> list[dict[str, Any]]:
+def read_validate_jsonl(path: Path, *, check_current_source: bool = False, allow_missing_source: bool = False) -> list[dict[str, Any]]:
     records = []
     seen = set()
     for line_no, raw in enumerate(path.read_bytes().splitlines(), 1):
@@ -630,7 +645,7 @@ def read_validate_jsonl(path: Path, *, check_current_source: bool = False) -> li
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             fail(f"invalid JSON at line {line_no}: {exc}")
         require(canonical_json_bytes(obj) == raw, f"noncanonical JSON at line {line_no}")
-        validate_result_record(obj, check_current_source=check_current_source)
+        validate_result_record(obj, check_current_source=check_current_source, allow_missing_source=allow_missing_source)
         ident = (obj["case_id"], obj["phase"], obj["seed_role"], obj["seed_index"], obj["budget"], obj["algorithm_config_sha256"])
         require(ident not in seen, f"duplicate run identity at line {line_no}")
         seen.add(ident); records.append(obj)
@@ -726,4 +741,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ISDValidationError, OSError, json.JSONDecodeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
