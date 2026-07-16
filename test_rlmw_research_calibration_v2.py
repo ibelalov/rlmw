@@ -5,10 +5,10 @@ import rlmw_research_calibration_v2 as cal
 
 class CalibrationV2OperationalTests(unittest.TestCase):
     def flow(self):
-        man=cal.make_fixture_manifest(); fit=cal.build_threshold_fit_plan(man)
+        man=cal.make_fixture_manifest(); fit=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
         fit_records=[cal.execute_run(r, fit) for r in fit['runs']]
         thresholds=cal.fit_thresholds(man, fit, fit_records)
-        tier=cal.build_tier_reference_plan(man, thresholds)
+        tier=cal.build_tier_reference_plan(man, thresholds, profile_id=cal.FIXTURE_PROFILE_ID)
         tier_records=[cal.execute_run(r, tier) for r in tier['runs']]
         tiers=cal.validate_tiers(man, tier, thresholds, tier_records)
         return man,fit,fit_records,thresholds,tier,tier_records,tiers
@@ -22,10 +22,24 @@ class CalibrationV2OperationalTests(unittest.TestCase):
         self.assertEqual(cal.validate_results(tier, tier_records)['missing'], 0)
         self.assertEqual(len(thresholds['thresholds']), len(man['records']))
         self.assertEqual(len(tiers['tiers']), len(man['records']))
+
+    def test_production_n15_n16_budgets_and_fixture_profile(self):
+        records=[]
+        for n in (15,16):
+            h=['1'+'0'*(n-1)]
+            records.append({'case_id':f'prod-n{n}','H_rows':h,'public_h_sha256':cal.isd_v2.public_h_sha256(h),'n':n,'family_id':'exact-control','validation':{'known_distance':{'distance':1}}})
+        man={'manifest_kind':'calibration_fixture_manifest','candidate_manifest_digest':'e'*64,'configuration_digest':cal.corpus_v2.config_digest(),'records':records}
+        prod=cal.build_threshold_fit_plan(man)
+        self.assertEqual(prod['profile_id'], cal.PRODUCTION_PROFILE_ID)
+        self.assertTrue(all(r['budget']==(1<<18) for r in prod['runs']))
+        self.assertTrue(all(r['algorithm_config'].get('candidate_budget_adapter', r['algorithm_config'].get('candidate_budget')) in (1<<18, None) or r['algorithm_id']==cal.STERN for r in prod['runs']))
+        fix=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
+        self.assertEqual(fix['profile_id'], cal.FIXTURE_PROFILE_ID)
+        self.assertTrue(all(r['budget']==cal.FIXTURE_BUDGETS[-1] for r in fix['runs']))
     def test_run_shard_nonempty_membership_overwrite_and_merge(self):
         with tempfile.TemporaryDirectory() as d:
             d=Path(d); man=cal.make_fixture_manifest(); mp=d/'manifest.json'; cal.write_json(mp, man)
-            fit=cal.build_threshold_fit_plan(man); pp=d/'fit.json'; cal.write_json(pp, fit)
+            fit=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID); pp=d/'fit.json'; cal.write_json(pp, fit)
             out0=d/'s0.jsonl'; out1=d/'s1.jsonl'
             self.assertEqual(cal.main(['run-shard',str(mp),str(pp),'--shard-index','0','--shard-count','2','--output',str(out0),'--allow-fixture']),0)
             self.assertGreater(len(cal.read_jsonl(out0)),0)

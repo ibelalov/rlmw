@@ -59,6 +59,9 @@ threshold model only, not a minimum-distance claim.
 Generated outputs should be directed outside the repository, for example under
 `/tmp` or controlled external artifact storage.
 
+Production plans use the frozen budget ladder verbatim. Smoke/fixture runs use the explicit `calibration_fixture_smoke_v2` profile with declared budgets `[8, 16, 24, 32]`; these fixture plans are identifiable by profile ID and are not production calibration evidence. Threshold-fit adapters accept `W = null` rather than receiving a hidden threshold.
+
+
 ```bash
 python rlmw_research_calibration_v2.py threshold-fit-plan candidate_pool_manifest.json --output /tmp/rlmw-cal-v2/fit-plan.json
 python rlmw_research_calibration_v2.py run-shard candidate_pool_manifest.json /tmp/rlmw-cal-v2/fit-plan.json --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/fit-shard-000.jsonl

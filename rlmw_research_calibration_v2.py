@@ -31,6 +31,9 @@ STERN = isd_v2.ALGORITHM_ID
 CP_SAT = v1.CP_SAT_THRESHOLD_REFERENCE
 SOLVER_DISABLED_ALGORITHMS = (UNIFORM, FIXED, LEE, STERN)
 BUDGETS = (1 << 12, 1 << 14, 1 << 16, 1 << 18)
+FIXTURE_BUDGETS = (8, 16, 24, 32)
+PRODUCTION_PROFILE_ID = "calibration_v2"
+FIXTURE_PROFILE_ID = "calibration_fixture_smoke_v2"
 FIT_PHASE, TIER_PHASE, REFERENCE_PHASE = "threshold_fit", "tier_validation", "solver_assisted_reference"
 FIT_ROLE, TIER_ROLE = "threshold_fit_seed", "tier_validation_seed"
 CP_SAT_SEED_PAIRS = ((FIT_PHASE, FIT_ROLE, 0), (FIT_PHASE, FIT_ROLE, 1), (TIER_PHASE, TIER_ROLE, 0), (TIER_PHASE, TIER_ROLE, 1))
@@ -128,18 +131,18 @@ def evaluator_metadata(rec: Mapping[str, Any]) -> dict[str, Any]:
 
 def algorithm_config(algorithm_id: str, *, budget: int, n: int, rank: int) -> dict[str, Any]:
     genuine_int(budget, "budget", minimum=0); k = n - rank
-    effective_budget = min(budget, 32) if n <= 16 else budget
+    effective_budget = budget
     if algorithm_id == UNIFORM:
-        cfg = {"candidate_budget": effective_budget, "sampling_with_replacement": True, "exhaust_candidate_budget": True, "prng_version": v1.PRNG_VERSION}
+        cfg = {"candidate_budget": budget, "sampling_with_replacement": True, "exhaust_candidate_budget": True, "prng_version": v1.PRNG_VERSION}
         v1.validate_algorithm_config(UNIFORM, cfg, n=n, k=k); return cfg
     if algorithm_id == FIXED:
-        cfg = {"candidate_budget": effective_budget, "weights": list(range(1, min(12, n) + 1)), "weight_schedule": "round_robin", "sampling_with_replacement_across_iterations": True, "exhaust_candidate_budget": True, "prng_version": v1.PRNG_VERSION}
+        cfg = {"candidate_budget": budget, "weights": list(range(1, min(12, n) + 1)), "weight_schedule": "round_robin", "sampling_with_replacement_across_iterations": True, "exhaust_candidate_budget": True, "prng_version": v1.PRNG_VERSION}
         v1.validate_algorithm_config(FIXED, cfg, n=n, k=k); return cfg
     if algorithm_id == LEE:
-        cfg = {"candidate_budget": effective_budget, "information_set_budget": (8 if n <= 16 else 4096), "max_information_weight": 1 if k <= 1 else 2, "pattern_mode": "enumerate_nonzero_weight_at_most_p_lexicographic", "information_set_sampling": "uniform_r_subset_with_replacement", "exhaust_candidate_budget": True, "prng_version": v1.PRNG_VERSION}
+        cfg = {"candidate_budget": budget, "information_set_budget": 4096, "max_information_weight": 1 if k <= 1 else 2, "pattern_mode": "enumerate_nonzero_weight_at_most_p_lexicographic", "information_set_sampling": "uniform_r_subset_with_replacement", "exhaust_candidate_budget": True, "prng_version": v1.PRNG_VERSION}
         v1.validate_algorithm_config(LEE, cfg, n=n, k=k); return cfg
     if algorithm_id == STERN:
-        return isd_v2.algorithm_config("calibration", rank=rank) | {"candidate_budget_adapter": effective_budget}
+        return isd_v2.algorithm_config("calibration", rank=rank) | {"candidate_budget_adapter": budget}
     if algorithm_id == CP_SAT:
         return copy.deepcopy(CP_SAT_PROFILES[0])
     fail(f"unknown algorithm {algorithm_id}")
@@ -152,88 +155,175 @@ def rng_for(run: Mapping[str, Any], cfg_digest: str) -> v1.Sha256CounterRng:
 def common_plan_fields(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return {"protocol_id": PROTOCOL_ID, "candidate_manifest_sha256": manifest_digest(manifest), "candidate_generator_config_sha256": manifest.get("configuration_digest", corpus_v2.config_digest()), "calibration_source_commit": current_commit(), "module_digests": module_digests(), "dependency_versions": dependency_versions()}
 
-def build_threshold_fit_plan(manifest: Mapping[str, Any]) -> dict[str, Any]:
+def plan_budgets(profile_id: str) -> tuple[int, int, int, int]:
+    require(profile_id in (PRODUCTION_PROFILE_ID, FIXTURE_PROFILE_ID), "unknown calibration profile")
+    return FIXTURE_BUDGETS if profile_id == FIXTURE_PROFILE_ID else BUDGETS
+
+def build_threshold_fit_plan(manifest: Mapping[str, Any], *, profile_id: str = PRODUCTION_PROFILE_ID) -> dict[str, Any]:
+    budgets = plan_budgets(profile_id)
     common = common_plan_fields(manifest); runs = []
     for rec in manifest["records"]:
         case = case_public(rec); validate_public_case(case); rows, n = v1.parse_h_rows(case["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n)
         for alg in SOLVER_DISABLED_ALGORITHMS:
-            cfg = algorithm_config(alg, budget=BUDGETS[-1], n=n, rank=rank); cd = config_digest(cfg)
+            cfg = algorithm_config(alg, budget=budgets[-1], n=n, rank=rank); cd = config_digest(cfg)
             for seed_index in range(8):
-                runs.append({"run_schema": "fit-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": FIT_PHASE, "seed_role": FIT_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(FIT_ROLE, seed_index), "budget": BUDGETS[-1]})
-    plan = {"schema": FIT_PLAN_SCHEMA, **common, "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
+                runs.append({"run_schema": "fit-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": FIT_PHASE, "seed_role": FIT_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(FIT_ROLE, seed_index), "budget": budgets[-1]})
+    plan = {"schema": FIT_PLAN_SCHEMA, **common, "profile_id": profile_id, "budgets": list(budgets), "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
 
 def threshold_map(thresholds: Mapping[str, Any]) -> dict[str, Any]: return {t["case_id"]: t for t in thresholds["thresholds"]}
-def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[str, Any]) -> dict[str, Any]:
-    validate_threshold_artifact(thresholds, manifest=manifest); tm = threshold_map(thresholds); common = common_plan_fields(manifest); runs = []
+def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[str, Any], *, profile_id: str = PRODUCTION_PROFILE_ID) -> dict[str, Any]:
+    budgets = plan_budgets(profile_id)
+    validate_threshold_artifact(thresholds, manifest=manifest); require(thresholds["candidate_manifest_sha256"] == manifest_digest(manifest), "threshold/manifest digest mismatch"); tm = threshold_map(thresholds); common = common_plan_fields(manifest); runs = []
     for rec in manifest["records"]:
         case = case_public(rec); rows, n = v1.parse_h_rows(case["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n); W = tm[case["case_id"]]["W"]
         for alg in SOLVER_DISABLED_ALGORITHMS:
-            for budget in BUDGETS:
+            for budget in budgets:
                 cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
                 for seed_index in range(8): runs.append({"run_schema": "tier-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": TIER_PHASE, "seed_role": TIER_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(TIER_ROLE, seed_index), "budget": budget, "W": W})
         if W is not None:
             for profile in CP_SAT_PROFILES:
                 cfg = copy.deepcopy(profile); cd = config_digest(cfg)
                 for phase, role, seed_index in CP_SAT_SEED_PAIRS: runs.append({"run_schema": "reference-run-v2", **case, "solver_stratum": SOLVER_ASSISTED, "algorithm_id": CP_SAT, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": REFERENCE_PHASE, "seed_role": role, "seed_index": seed_index, "seed_hex": seed_hex(role, seed_index), "budget": 0, "W": W, "reference_source_phase": phase})
-    plan = {"schema": TIER_PLAN_SCHEMA, **common, "thresholds_sha256": thresholds["thresholds_sha256"], "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
+    plan = {"schema": TIER_PLAN_SCHEMA, **common, "profile_id": profile_id, "budgets": list(budgets), "thresholds_sha256": thresholds["thresholds_sha256"], "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
 
 def validate_plan(plan: Mapping[str, Any], *, expected_schema: str | None = None) -> None:
     require(plan.get("schema") in (FIT_PLAN_SCHEMA, TIER_PLAN_SCHEMA), "unknown plan schema")
     if expected_schema: require(plan.get("schema") == expected_schema, "wrong plan phase")
     require(plan.get("protocol_id") == PROTOCOL_ID, "wrong protocol")
-    for key in ("candidate_manifest_sha256", "candidate_generator_config_sha256", "calibration_source_commit", "module_digests", "runs", "plan_sha256"):
+    for key in ("candidate_manifest_sha256", "candidate_generator_config_sha256", "calibration_source_commit", "module_digests", "dependency_versions", "profile_id", "budgets", "runs", "plan_sha256"):
         require(key in plan, f"missing plan field {key}")
     require(is_sha256(plan["candidate_manifest_sha256"]) and is_sha256(plan["candidate_generator_config_sha256"]), "bad plan digests")
     require(isinstance(plan["calibration_source_commit"], str) and len(plan["calibration_source_commit"]) >= 40, "bad source commit")
     require(plan["plan_sha256"] == digest({k:v for k,v in plan.items() if k != "plan_sha256"}), "plan digest mismatch")
     seen = set()
     for run in plan["runs"]:
-        validate_run(run, plan_schema=plan["schema"]); ident = run_identity(run); require(ident not in seen, "duplicate plan run"); seen.add(ident)
+        validate_run(run, plan_schema=plan["schema"], profile_id=plan["profile_id"], budgets=tuple(plan["budgets"])); ident = run_identity(run); require(ident not in seen, "duplicate plan run"); seen.add(ident)
 
-def validate_run(run: Mapping[str, Any], *, plan_schema: str) -> None:
+def validate_plan_against_manifest(plan: Mapping[str, Any], manifest: Mapping[str, Any]) -> None:
+    validate_plan(plan)
+    require(plan["candidate_manifest_sha256"] == manifest_digest(manifest), "plan/manifest digest mismatch")
+    require(plan["candidate_generator_config_sha256"] == manifest.get("configuration_digest", corpus_v2.config_digest()), "plan/manifest config mismatch")
+    by_case = {rec["case_id"]: case_public(rec) for rec in manifest["records"]}
+    for run in plan["runs"]:
+        require(run["case_id"] in by_case, "planned case missing from manifest")
+        expected = by_case[run["case_id"]]
+        require(run["H_rows"] == expected["H_rows"] and run["public_h_sha256"] == expected["public_h_sha256"], "planned H does not match manifest")
+
+
+def validate_run(run: Mapping[str, Any], *, plan_schema: str, profile_id: str = PRODUCTION_PROFILE_ID, budgets: Sequence[int] = BUDGETS) -> None:
     required = {"run_schema", "case_id", "H_rows", "public_h_sha256", "solver_stratum", "algorithm_id", "algorithm_config", "algorithm_config_sha256", "phase", "seed_role", "seed_index", "seed_hex", "budget"}
     if plan_schema == TIER_PLAN_SCHEMA: required |= {"W"}
-    require(set(run) >= required, "run missing required fields")
+    allowed = set(required)
+    if plan_schema == TIER_PLAN_SCHEMA and run.get("solver_stratum") == SOLVER_ASSISTED:
+        allowed.add("reference_source_phase")
+    require(set(run) == allowed, "run has missing or unknown fields")
     require(not (set(run) & FORBIDDEN_PAYLOAD_KEYS), "run leaked evaluator-only fields")
     validate_public_case({"case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"]})
     genuine_int(run["seed_index"], "seed_index", minimum=0, maximum=7); genuine_int(run["budget"], "budget", minimum=0)
     if plan_schema == FIT_PLAN_SCHEMA:
-        require(run["phase"] == FIT_PHASE and run["seed_role"] == FIT_ROLE and run["budget"] == BUDGETS[-1], "bad fit phase/role/budget")
+        require(run["phase"] == FIT_PHASE and run["seed_role"] == FIT_ROLE and run["budget"] == budgets[-1], "bad fit phase/role/budget")
         require("W" not in run, "threshold-fit run must not contain W")
         require(run["solver_stratum"] == SOLVER_DISABLED and run["algorithm_id"] in SOLVER_DISABLED_ALGORITHMS, "fit plan must be solver-disabled only")
     else:
         if run["solver_stratum"] == SOLVER_DISABLED:
-            require(run["phase"] == TIER_PHASE and run["seed_role"] == TIER_ROLE and run["budget"] in BUDGETS and run["algorithm_id"] in SOLVER_DISABLED_ALGORITHMS, "bad tier run")
+            require(run["phase"] == TIER_PHASE and run["seed_role"] == TIER_ROLE and run["budget"] in budgets and run["algorithm_id"] in SOLVER_DISABLED_ALGORITHMS, "bad tier run")
         else:
             require(run["solver_stratum"] == SOLVER_ASSISTED and run["algorithm_id"] == CP_SAT and run["phase"] == REFERENCE_PHASE, "bad reference run")
             require((run.get("reference_source_phase"), run["seed_role"], run["seed_index"]) in CP_SAT_SEED_PAIRS, "bad CP-SAT seed pair")
         if run["W"] is not None: genuine_int(run["W"], "W", minimum=0)
     require(run["algorithm_config_sha256"] == config_digest(run["algorithm_config"]), "config digest mismatch")
+    rows, n = v1.parse_h_rows(run["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n)
+    if run["algorithm_id"] in SOLVER_DISABLED_ALGORITHMS:
+        expected_cfg = algorithm_config(run["algorithm_id"], budget=run["budget"], n=n, rank=rank)
+    elif run["algorithm_id"] == CP_SAT:
+        require(any(canonical_bytes(run["algorithm_config"]) == canonical_bytes(profile) for profile in CP_SAT_PROFILES), "CP-SAT config is not frozen")
+        expected_cfg = run["algorithm_config"]
+    else:
+        expected_cfg = run["algorithm_config"]
+    require(canonical_bytes(run["algorithm_config"]) == canonical_bytes(expected_cfg), "algorithm config is not frozen for run")
+    require(run["seed_hex"] == seed_hex(run["seed_role"], run["seed_index"]), "seed hex mismatch")
 
 def run_identity(run: Mapping[str, Any]) -> tuple[Any, ...]: return (run["case_id"], run["solver_stratum"], run["algorithm_id"], run["phase"], run["seed_role"], run["seed_index"], run["budget"], run["algorithm_config_sha256"], run.get("reference_source_phase"))
 
+def run_uniform_v2(public_input: Mapping[str, Any], config: Mapping[str, Any], rng: v1.Sha256CounterRng) -> v1.BaselineOutcome:
+    h_rows, n = v1.parse_h_rows(public_input["H_rows"]); basis, _, _ = v1.deterministic_kernel_basis(h_rows, n)
+    v1.validate_algorithm_config(UNIFORM, dict(config), n=n, k=len(basis)); budget = config["candidate_budget"]
+    outcome = v1.BaselineOutcome(solver_status=None, solver_status_raw=None)
+    if not basis:
+        outcome.termination_reason = "trivial_code_no_nonzero_word"; outcome.diagnostics = {"kernel_dimension": 0, "zero_coefficient_draws": 0, "duplicate_candidates": 0}; return outcome
+    seen: set[int] = set(); zero_draws = 0; W = public_input.get("W")
+    while outcome.candidate_evaluations < budget:
+        coefficients = rng.randbits(len(basis))
+        if coefficients == 0: zero_draws += 1; continue
+        candidate = v1.kernel_word(basis, coefficients); weight = v1.verify_nonzero_kernel_word(h_rows, n, candidate)
+        outcome.candidate_evaluations += 1; outcome.objective_evaluations += 1; outcome.exact_verifications += 1; outcome.valid_codewords_seen += 1; outcome.iterations += 1
+        if W is not None and weight <= W: outcome.threshold_witnesses_seen += 1
+        v1._update_incumbent(outcome, candidate); seen.add(candidate)
+    outcome.termination_reason = "candidate_budget_exhausted"; outcome.diagnostics = {"kernel_dimension": len(basis), "zero_coefficient_draws": zero_draws, "duplicate_candidates": outcome.candidate_evaluations-len(seen), "sampling_scope": "v2_uniform_nonzero_kernel_coefficients_with_replacement"}; return outcome
+
+def run_fixed_v2(public_input: Mapping[str, Any], config: Mapping[str, Any], rng: v1.Sha256CounterRng) -> v1.BaselineOutcome:
+    h_rows, n = v1.parse_h_rows(public_input["H_rows"]); v1.validate_algorithm_config(FIXED, dict(config), n=n); columns = v1._column_syndromes(h_rows, n)
+    outcome = v1.BaselineOutcome(solver_status=None, solver_status_raw=None); seen: set[int] = set(); W = public_input.get("W")
+    for evaluation in range(config["candidate_budget"]):
+        requested_weight = config["weights"][evaluation % len(config["weights"])]
+        support = rng.sample_subset(n, requested_weight); candidate = sum(1 << coordinate for coordinate in support); syndrome = 0
+        for coordinate in support: syndrome ^= columns[coordinate]
+        outcome.candidate_evaluations += 1; outcome.objective_evaluations += 1; outcome.exact_verifications += 1; outcome.iterations += 1
+        if syndrome == 0:
+            weight = v1.verify_nonzero_kernel_word(h_rows, n, candidate); outcome.valid_codewords_seen += 1
+            if W is not None and weight <= W: outcome.threshold_witnesses_seen += 1
+            v1._update_incumbent(outcome, candidate)
+        seen.add(candidate)
+    outcome.termination_reason = "candidate_budget_exhausted"; outcome.diagnostics = {"duplicate_subsets": outcome.candidate_evaluations-len(seen), "sampling_scope": "v2_coordinate_subsets_with_replacement"}; return outcome
+
+def run_lee_v2(public_input: Mapping[str, Any], config: Mapping[str, Any], rng: v1.Sha256CounterRng) -> v1.BaselineOutcome:
+    original_rows, n = v1.parse_h_rows(public_input["H_rows"]); independent_rows, _ = v1.rref_bit_rows(original_rows, n); rank = len(independent_rows); k = n-rank
+    v1.validate_algorithm_config(LEE, dict(config), n=n, k=k); outcome = v1.BaselineOutcome(solver_status=None, solver_status_raw=None); W = public_input.get("W")
+    if k == 0: outcome.termination_reason = "trivial_code_no_nonzero_word"; outcome.diagnostics = {"rank": rank, "kernel_dimension": 0}; return outcome
+    seen: set[int] = set()
+    for _attempt in range(config["information_set_budget"]):
+        if outcome.candidate_evaluations >= config["candidate_budget"]: break
+        outcome.information_set_attempts += 1; outcome.iterations += 1; parity_coordinates = rng.sample_subset(n, rank)
+        systematic = v1._systematic_codeword_basis(independent_rows, original_rows, n, parity_coordinates)
+        if systematic is None: outcome.singular_information_sets += 1; continue
+        basis, _info = systematic; outcome.information_sets_accepted += 1; stop = False
+        for information_weight in range(1, config["max_information_weight"]+1):
+            import itertools
+            for local_support in itertools.combinations(range(k), information_weight):
+                if outcome.candidate_evaluations >= config["candidate_budget"]: stop = True; break
+                candidate = 0
+                for basis_index in local_support: candidate ^= basis[basis_index]
+                weight = v1.verify_nonzero_kernel_word(original_rows, n, candidate)
+                outcome.candidate_evaluations += 1; outcome.objective_evaluations += 1; outcome.exact_verifications += 1; outcome.valid_codewords_seen += 1
+                if W is not None and weight <= W: outcome.threshold_witnesses_seen += 1
+                v1._update_incumbent(outcome, candidate); seen.add(candidate)
+            if stop: break
+        if stop: break
+    outcome.termination_reason = "candidate_budget_exhausted" if outcome.candidate_evaluations >= config["candidate_budget"] else "information_set_budget_exhausted"
+    outcome.diagnostics = {"rank": rank, "kernel_dimension": k, "duplicate_candidates": outcome.candidate_evaluations-len(seen), "pattern_scope": "v2_lee_weight_at_most_p"}; return outcome
+
+
 def execute_run(run: Mapping[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
-    validate_run(run, plan_schema=plan["schema"]); rows, n = v1.parse_h_rows(run["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n); cfg = copy.deepcopy(run["algorithm_config"]); start = time.perf_counter(); error = None
+    validate_run(run, plan_schema=plan["schema"], profile_id=plan.get("profile_id", PRODUCTION_PROFILE_ID), budgets=tuple(plan.get("budgets", BUDGETS))); rows, n = v1.parse_h_rows(run["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n); cfg = copy.deepcopy(run["algorithm_config"]); start = time.perf_counter(); error = None
     public = {"case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"]}
-    if run.get("W") is not None: public["W"] = run["W"]
-    else: public["W"] = n  # adapter-only threshold counter; omitted from fit record and does not affect trajectories.
-    try:
-        if run["algorithm_id"] == UNIFORM:
-            outcome = v1.run_uniform_kernel_sampling(public, cfg, rng_for(run, run["algorithm_config_sha256"]))
-        elif run["algorithm_id"] == FIXED:
-            outcome = v1.run_fixed_weight_subset_sampling(public, cfg, rng_for(run, run["algorithm_config_sha256"]))
-        elif run["algorithm_id"] == LEE:
-            outcome = v1.run_lee_brickell_isd(public, cfg, rng_for(run, run["algorithm_config_sha256"]))
-        elif run["algorithm_id"] == STERN:
-            isd_public = {"case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"], "phase": FIT_PHASE if plan["schema"] == FIT_PLAN_SCHEMA else TIER_PHASE, "seed_role": run["seed_role"], "seed_index": run["seed_index"], "budget": min(run["budget"], 32) if len(run["H_rows"][0]) <= 16 else run["budget"], "candidate_protocol_version": corpus_v2.PROTOCOL_ID, "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "candidate_manifest_sha256": plan["candidate_manifest_sha256"]}
-            if run.get("W") is not None: isd_public["W"] = run["W"]
-            rec = isd_v2.run_record(isd_public, {k:v for k,v in cfg.items() if k != "candidate_budget_adapter"})
-            return normalize_isd_record(rec, run, plan, time.perf_counter() - start)
-        elif run["algorithm_id"] == CP_SAT:
-            outcome = v1.run_cp_sat_threshold_reference(public, cfg, int(run["seed_hex"][:16], 16))
-        else: fail("unknown algorithm")
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"; outcome = None
+    public["W"] = run.get("W")
+    if run["algorithm_id"] == UNIFORM:
+        outcome = run_uniform_v2(public, cfg, rng_for(run, run["algorithm_config_sha256"]))
+    elif run["algorithm_id"] == FIXED:
+        outcome = run_fixed_v2(public, cfg, rng_for(run, run["algorithm_config_sha256"]))
+    elif run["algorithm_id"] == LEE:
+        outcome = run_lee_v2(public, cfg, rng_for(run, run["algorithm_config_sha256"]))
+    elif run["algorithm_id"] == STERN:
+        isd_public = {"case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"], "phase": FIT_PHASE if plan["schema"] == FIT_PLAN_SCHEMA else TIER_PHASE, "seed_role": run["seed_role"], "seed_index": run["seed_index"], "budget": run["budget"], "candidate_protocol_version": corpus_v2.PROTOCOL_ID, "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "candidate_manifest_sha256": plan["candidate_manifest_sha256"]}
+        if run.get("W") is not None: isd_public["W"] = run["W"]
+        rec = isd_v2.run_record(isd_public, {k:v for k,v in cfg.items() if k != "candidate_budget_adapter"})
+        return normalize_isd_record(rec, run, plan, time.perf_counter() - start)
+    elif run["algorithm_id"] == CP_SAT:
+        try:
+            outcome = v1.run_cp_sat_threshold_reference(public, {k:v for k,v in cfg.items() if k != "profile_id"}, int(run["seed_hex"][:16], 16))
+        except v1.OptionalDependencyUnavailable as exc:
+            return normalize_dependency_unavailable(run, plan, rank=rank, runtime=time.perf_counter() - start, error=str(exc))
+    else: fail("unknown algorithm")
     return normalize_v1_outcome(outcome, run, plan, rank=rank, runtime=time.perf_counter() - start, error=error)
 
 def candidate_fields(best_word: int | None, rows: Sequence[int], n: int) -> dict[str, Any]:
@@ -245,20 +335,26 @@ def base_record(run: Mapping[str, Any], plan: Mapping[str, Any], *, rank: int, r
     record = {"result_schema": RESULT_SCHEMA, "protocol_id": PROTOCOL_ID, "plan_schema": plan["schema"], "plan_sha256": plan["plan_sha256"], "candidate_manifest_sha256": plan["candidate_manifest_sha256"], "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "calibration_source_commit": plan["calibration_source_commit"], "module_digests": plan["module_digests"], "dependency_versions": dependency_versions(), "case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"], "n": len(run["H_rows"][0]), "rank": rank, "solver_stratum": run["solver_stratum"], "algorithm_id": run["algorithm_id"], "algorithm_config": run["algorithm_config"], "algorithm_config_sha256": run["algorithm_config_sha256"], "phase": run["phase"], "seed_role": run["seed_role"], "seed_index": run["seed_index"], "seed_hex": run["seed_hex"], "budget": run["budget"], "W": run.get("W"), "runtime_s": 0.0, "reference_source_phase": run.get("reference_source_phase"), "record_sha256": ""}
     return record
 
+def normalize_dependency_unavailable(run: Mapping[str, Any], plan: Mapping[str, Any], *, rank: int, runtime: float, error: str) -> dict[str, Any]:
+    rows, n = v1.parse_h_rows(run["H_rows"]); rec = base_record(run, plan, rank=rank, runtime=runtime)
+    rec.update({"termination_reason": "dependency_unavailable", "completed_budget": False, "resource_limit": True, "error": error, "candidate_evaluations": 0, "objective_evaluations": 0, "exact_verifications": 0, "valid_codewords_seen": 0, "threshold_witnesses_seen": 0, "information_set_attempts": 0, "information_sets_accepted": 0, "singular_information_sets": 0, "solver_calls": 0, "solver_status": "DEPENDENCY_UNAVAILABLE", "solver_status_raw": None, "threshold_infeasibility_certified": False, "diagnostics": {}, **candidate_fields(None, rows, n)})
+    rec["threshold_hit"] = False; rec["record_sha256"] = digest({k:v for k,v in rec.items() if k != "record_sha256"}); return rec
+
+
 def normalize_v1_outcome(outcome: Any, run: Mapping[str, Any], plan: Mapping[str, Any], *, rank: int, runtime: float, error: str | None) -> dict[str, Any]:
     rows, n = v1.parse_h_rows(run["H_rows"]); rec = base_record(run, plan, rank=rank, runtime=runtime)
     if outcome is None:
         rec.update({"termination_reason": "error", "completed_budget": False, "resource_limit": True, "error": error, "candidate_evaluations": 0, "objective_evaluations": 0, "exact_verifications": 0, "valid_codewords_seen": 0, "threshold_witnesses_seen": 0, "information_set_attempts": 0, "information_sets_accepted": 0, "singular_information_sets": 0, "solver_calls": 0, "solver_status": None, "solver_status_raw": None, "threshold_infeasibility_certified": False, "diagnostics": {}, **candidate_fields(None, rows, n)})
     else:
-        cf = candidate_fields(outcome.best_candidate, rows, n); completed = outcome.termination_reason in {"candidate_budget_exhausted", "information_set_budget_exhausted", "trivial_code_no_nonzero_word"}
-        rec.update({"termination_reason": outcome.termination_reason, "completed_budget": completed and run["solver_stratum"] == SOLVER_DISABLED, "resource_limit": outcome.termination_reason in RESOURCE_TERMINATIONS, "error": None, "candidate_evaluations": outcome.candidate_evaluations, "objective_evaluations": outcome.objective_evaluations, "exact_verifications": outcome.exact_verifications, "valid_codewords_seen": outcome.valid_codewords_seen, "threshold_witnesses_seen": 0 if run["phase"] == FIT_PHASE else outcome.threshold_witnesses_seen, "information_set_attempts": outcome.information_set_attempts, "information_sets_accepted": outcome.information_sets_accepted, "singular_information_sets": outcome.singular_information_sets, "solver_calls": outcome.solver_calls, "solver_status": outcome.solver_status, "solver_status_raw": outcome.solver_status_raw, "threshold_infeasibility_certified": bool(outcome.threshold_infeasibility_certified), "diagnostics": outcome.diagnostics, **cf})
+        cf = candidate_fields(outcome.best_candidate, rows, n); completed = (run["solver_stratum"] == SOLVER_DISABLED and outcome.candidate_evaluations == run["budget"] and outcome.termination_reason == "candidate_budget_exhausted")
+        rec.update({"termination_reason": outcome.termination_reason, "completed_budget": completed, "resource_limit": (run["solver_stratum"] == SOLVER_DISABLED and not completed) or outcome.termination_reason in RESOURCE_TERMINATIONS, "error": None, "candidate_evaluations": outcome.candidate_evaluations, "objective_evaluations": outcome.objective_evaluations, "exact_verifications": outcome.exact_verifications, "valid_codewords_seen": outcome.valid_codewords_seen, "threshold_witnesses_seen": 0 if run["phase"] == FIT_PHASE else outcome.threshold_witnesses_seen, "information_set_attempts": outcome.information_set_attempts, "information_sets_accepted": outcome.information_sets_accepted, "singular_information_sets": outcome.singular_information_sets, "solver_calls": outcome.solver_calls, "solver_status": outcome.solver_status, "solver_status_raw": outcome.solver_status_raw, "threshold_infeasibility_certified": bool(outcome.threshold_infeasibility_certified), "diagnostics": outcome.diagnostics, **cf})
     rec["threshold_hit"] = bool(rec["W"] is not None and rec["best_weight"] is not None and rec["best_weight"] <= rec["W"])
     if run["phase"] == FIT_PHASE: rec["W"] = None; rec["threshold_hit"] = False; rec["threshold_witnesses_seen"] = 0
     rec["record_sha256"] = digest({k:v for k,v in rec.items() if k != "record_sha256"}); return rec
 
 def normalize_isd_record(src: Mapping[str, Any], run: Mapping[str, Any], plan: Mapping[str, Any], runtime: float) -> dict[str, Any]:
     rows, n = v1.parse_h_rows(run["H_rows"]); rec = base_record(run, plan, rank=src["rank"], runtime=runtime)
-    rec.update({"termination_reason": src["termination_reason"], "completed_budget": src["termination_reason"] == "candidate_budget_exhausted", "resource_limit": src["termination_reason"] == "resource_limit", "error": None, "candidate_evaluations": src["candidate_evaluations"], "objective_evaluations": src["objective_evaluations"], "exact_verifications": src["exact_verifications"], "valid_codewords_seen": src["valid_codewords_seen"], "threshold_witnesses_seen": 0 if run["phase"] == FIT_PHASE else src["threshold_witnesses_seen"], "information_set_attempts": src["information_set_attempts"], "information_sets_accepted": src["information_sets_accepted"], "singular_information_sets": src["singular_information_sets"], "solver_calls": 0, "solver_status": None, "solver_status_raw": None, "threshold_infeasibility_certified": False, "diagnostics": src["diagnostics"], "best_candidate_bits": src["best_candidate_bits"], "best_candidate_sha256": src["best_candidate_sha256"], "best_weight": src["best_weight"], "witness_verified": src["witness_verified"]})
+    rec.update({"termination_reason": src["termination_reason"], "completed_budget": src["candidate_evaluations"] == run["budget"] and src["termination_reason"] == "candidate_budget_exhausted", "resource_limit": not (src["candidate_evaluations"] == run["budget"] and src["termination_reason"] == "candidate_budget_exhausted"), "error": None, "candidate_evaluations": src["candidate_evaluations"], "objective_evaluations": src["objective_evaluations"], "exact_verifications": src["exact_verifications"], "valid_codewords_seen": src["valid_codewords_seen"], "threshold_witnesses_seen": 0 if run["phase"] == FIT_PHASE else src["threshold_witnesses_seen"], "information_set_attempts": src["information_set_attempts"], "information_sets_accepted": src["information_sets_accepted"], "singular_information_sets": src["singular_information_sets"], "solver_calls": 0, "solver_status": None, "solver_status_raw": None, "threshold_infeasibility_certified": False, "diagnostics": src["diagnostics"], "best_candidate_bits": src["best_candidate_bits"], "best_candidate_sha256": src["best_candidate_sha256"], "best_weight": src["best_weight"], "witness_verified": src["witness_verified"]})
     rec["threshold_hit"] = bool(rec["W"] is not None and rec["best_weight"] is not None and rec["best_weight"] <= rec["W"])
     if run["phase"] == FIT_PHASE: rec["W"] = None; rec["threshold_hit"] = False
     rec["record_sha256"] = digest({k:v for k,v in rec.items() if k != "record_sha256"}); return rec
@@ -285,12 +381,22 @@ def validate_result_record(record: Mapping[str, Any], *, plan: Mapping[str, Any]
     require(record["threshold_hit"] == (record["W"] is not None and record["best_weight"] is not None and record["best_weight"] <= record["W"]), "threshold-hit mismatch")
     if record["solver_stratum"] == SOLVER_DISABLED: require(record["algorithm_id"] in SOLVER_DISABLED_ALGORITHMS and record["solver_calls"] == 0, "solver-disabled separation violated")
     else: require(record["algorithm_id"] == CP_SAT and record["solver_stratum"] == SOLVER_ASSISTED, "solver-assisted separation violated")
+    if record["solver_stratum"] == SOLVER_DISABLED:
+        require(record["candidate_evaluations"] <= record["budget"], "candidate budget exceeded")
+        require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"], "candidate/objective/verification counters mismatch")
+        require(record["valid_codewords_seen"] <= record["candidate_evaluations"], "valid count exceeds candidates")
+        require(record["threshold_witnesses_seen"] <= record["valid_codewords_seen"], "threshold count exceeds valid count")
+        require(record["information_sets_accepted"] + record["singular_information_sets"] == record["information_set_attempts"], "information-set accounting mismatch")
+        require(record["completed_budget"] == (record["candidate_evaluations"] == record["budget"] and record["termination_reason"] == "candidate_budget_exhausted"), "completed_budget semantics mismatch")
     if record["completed_budget"]: require(record["resource_limit"] is False, "completed resource-limit mismatch")
     if plan is not None:
         require(record["plan_sha256"] == plan["plan_sha256"], "record bound to wrong plan")
-        for bind in ("candidate_manifest_sha256", "candidate_generator_config_sha256", "calibration_source_commit"):
+        for bind in ("candidate_manifest_sha256", "candidate_generator_config_sha256", "calibration_source_commit", "module_digests", "dependency_versions") :
             require(record[bind] == plan[bind], f"record binding mismatch {bind}")
         exp = {run_identity(run): run for run in plan["runs"]}; ident = result_identity(record); require(ident in exp, "record identity not in plan")
+        planned = exp[ident]
+        for field in ("case_id", "H_rows", "public_h_sha256", "W", "seed_role", "seed_index", "seed_hex", "phase", "budget", "solver_stratum", "algorithm_id", "algorithm_config", "algorithm_config_sha256", "reference_source_phase"):
+            require(record[field] == planned.get(field), f"record planned-field mismatch {field}")
 
 def result_identity(record: Mapping[str, Any]) -> tuple[Any, ...]: return (record["case_id"], record["solver_stratum"], record["algorithm_id"], record["phase"], record["seed_role"], record["seed_index"], record["budget"], record["algorithm_config_sha256"], record.get("reference_source_phase"))
 
@@ -327,9 +433,10 @@ def fit_thresholds(manifest: Mapping[str, Any], plan: Mapping[str, Any], records
             else:
                 W = None; source = "insufficient_availability"; decision = "calibration_incomplete"; artificial = False
         thresholds.append({"case_id": cid, "public_h_sha256": crec["public_h_sha256"], "n": crec.get("n"), "W": W, "threshold_source": source, "decision": decision, "planted_threshold_artificial": artificial, "certified_lower_bound": meta["certified_lower_bound"], "exact_distance": meta["exact_distance"], "fit_denominator": len(SOLVER_DISABLED_ALGORITHMS)*8, "fit_available": sum(1 for r in rs if completed_incumbent(r)), "fit_contributing_algorithms": sorted({r["algorithm_id"] for r in rs if completed_incumbent(r)})})
-    artifact = {"schema": THRESHOLD_SCHEMA, "protocol_id": PROTOCOL_ID, "fit_plan_sha256": plan["plan_sha256"], "candidate_manifest_sha256": manifest_digest(manifest), "thresholds": thresholds}; artifact["thresholds_sha256"] = digest({k:v for k,v in artifact.items() if k != "thresholds_sha256"}); return artifact
+    artifact = {"schema": THRESHOLD_SCHEMA, "protocol_id": PROTOCOL_ID, "fit_plan_sha256": plan["plan_sha256"], "candidate_manifest_sha256": manifest_digest(manifest), "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "thresholds": thresholds}; artifact["thresholds_sha256"] = digest({k:v for k,v in artifact.items() if k != "thresholds_sha256"}); return artifact
 
 def validate_threshold_artifact(artifact: Mapping[str, Any], *, manifest: Mapping[str, Any] | None = None) -> None:
+    require(set(artifact) == {"schema", "protocol_id", "fit_plan_sha256", "candidate_manifest_sha256", "candidate_generator_config_sha256", "thresholds", "thresholds_sha256"}, "bad threshold top-level schema")
     require(artifact.get("schema") == THRESHOLD_SCHEMA and artifact.get("protocol_id") == PROTOCOL_ID, "bad threshold artifact")
     require(artifact.get("thresholds_sha256") == digest({k:v for k,v in artifact.items() if k != "thresholds_sha256"}), "threshold artifact digest mismatch")
     seen = set()
@@ -337,7 +444,18 @@ def validate_threshold_artifact(artifact: Mapping[str, Any], *, manifest: Mappin
         require(set(row) == {"case_id", "public_h_sha256", "n", "W", "threshold_source", "decision", "planted_threshold_artificial", "certified_lower_bound", "exact_distance", "fit_denominator", "fit_available", "fit_contributing_algorithms"}, "bad threshold row schema")
         require(row["case_id"] not in seen, "duplicate threshold row"); seen.add(row["case_id"])
         if row["W"] is not None: genuine_int(row["W"], "W", minimum=0)
-    if manifest is not None: require(seen == {r["case_id"] for r in manifest["records"]}, "threshold artifact cases do not match manifest")
+    if manifest is not None:
+        require(artifact["candidate_manifest_sha256"] == manifest_digest(manifest), "threshold manifest digest mismatch")
+        require(seen == {r["case_id"] for r in manifest["records"]}, "threshold artifact cases do not match manifest")
+        by_row = {row["case_id"]: row for row in artifact["thresholds"]}
+        for rec in manifest["records"]:
+            meta = evaluator_metadata(rec); row = by_row[rec["case_id"]]
+            require(row["public_h_sha256"] == rec["public_h_sha256"] and row["n"] == rec.get("n"), "threshold public-H/n mismatch")
+            require(row["certified_lower_bound"] == meta["certified_lower_bound"] and row["exact_distance"] == meta["exact_distance"], "threshold evaluator metadata mismatch")
+            if meta["exact_distance"] is not None:
+                require(row["W"] == meta["exact_distance"] and row["threshold_source"] == "exact_control_replay", "exact threshold replay mismatch")
+            if meta["is_planted"] and meta["planted_upper_bound"] is not None:
+                require(row["W"] == meta["planted_upper_bound"] and row["planted_threshold_artificial"] is True, "planted threshold replay mismatch")
 
 def validate_tiers(manifest: Mapping[str, Any], plan: Mapping[str, Any], thresholds: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     validate_plan(plan, expected_schema=TIER_PLAN_SCHEMA); validate_threshold_artifact(thresholds, manifest=manifest); validate_results(plan, records)
@@ -349,33 +467,55 @@ def validate_tiers(manifest: Mapping[str, Any], plan: Mapping[str, Any], thresho
         cid = crec["case_id"]; trow = tm[cid]; W = trow["W"]; rs = by_case.get(cid, []); n = int(trow["n"] or len(crec["H_rows"][0])); lower = int(trow["certified_lower_bound"] or 1)
         if W is None: tiers.append({"case_id": cid, "tier": "calibration_incomplete", "decision": "incomplete", "reason": "missing_threshold"}); continue
         rates = {}; rlf = {}
-        for budget in BUDGETS:
+        for budget in plan["budgets"]:
             br = [r for r in rs if r["budget"] == budget]; denom = len(SOLVER_DISABLED_ALGORITHMS)*8
             rates[str(budget)] = sum(1 for r in br if r["threshold_hit"])/denom
             rlf[str(budget)] = (denom - len(br) + sum(1 for r in br if r["resource_limit"] or not r["completed_budget"])) / denom
-        maxrs = [r for r in rs if r["budget"] == BUDGETS[-1] and completed_incumbent(r)]; weights = [r["best_weight"] for r in maxrs]
+        maxrs = [r for r in rs if r["budget"] == plan["budgets"][-1] and completed_incumbent(r)]; weights = [r["best_weight"] for r in maxrs]
         iqr = None if len(weights) < 8 else nearest_rank(weights, .75) - nearest_rank(weights, .25)
         medians = {alg: lower_median([r["best_weight"] for r in maxrs if r["algorithm_id"] == alg]) for alg in SOLVER_DISABLED_ALGORITHMS if len([r for r in maxrs if r["algorithm_id"] == alg]) >= 2}
         agree = any(abs(a-b) <= 2 for i, a in enumerate(medians.values()) for b in list(medians.values())[i+1:])
         best = min(weights) if weights else None; hard_gap_ok = best is not None and best - lower <= max(12, math.ceil(0.20*n))
-        hi, lo = rates[str(BUDGETS[-1])], rates[str(BUDGETS[0])]
+        hi, lo = rates[str(plan["budgets"][-1])], rates[str(plan["budgets"][0])]
         if trow["exact_distance"] is not None: tier, decision, reason = "control_exact", "accepted", "exact_control"
         elif iqr is None: tier, decision, reason = "calibration_incomplete", "incomplete", "insufficient_incumbent_iqr"
         elif not agree: tier, decision, reason = "calibration_incomplete", "incomplete", "algorithm_disagreement"
         elif .70 <= hi < .90 and lo < .70: tier, decision, reason = "easy_calibrated", "accepted", "easy_rule"
-        elif .35 <= hi < .70 and lo < .50 and iqr >= 1 and rlf[str(BUDGETS[-1])] < .25: tier, decision, reason = "medium_calibrated", "accepted", "medium_rule"
-        elif .10 <= hi < .35 and best is not None and rlf[str(BUDGETS[-1])] < .50 and hard_gap_ok: tier, decision, reason = "hard_calibrated", "accepted", "hard_rule"
+        elif .35 <= hi < .70 and lo < .50 and iqr >= 1 and rlf[str(plan["budgets"][-1])] < .25: tier, decision, reason = "medium_calibrated", "accepted", "medium_rule"
+        elif .10 <= hi < .35 and best is not None and rlf[str(plan["budgets"][-1])] < .50 and hard_gap_ok: tier, decision, reason = "hard_calibrated", "accepted", "hard_rule"
         else: tier, decision, reason = "calibration_incomplete", "incomplete", "tier_rule_not_satisfied"
+        if trow["planted_threshold_artificial"]:
+            tier, decision, reason = "planted_artificial", "accepted", "artificial_planted_threshold"
         tiers.append({"case_id": cid, "tier": tier, "decision": decision, "reason": reason, "W": W, "hit_rates": rates, "resource_limit_frequencies": rlf, "iqr": iqr, "algorithm_medians": medians, "algorithm_agreement_gap2": agree, "best_solver_disabled_upper_bound": best, "certified_lower_bound": lower, "hard_gap_ok": hard_gap_ok})
     artifact = {"schema": TIER_SCHEMA, "protocol_id": PROTOCOL_ID, "tier_plan_sha256": plan["plan_sha256"], "thresholds_sha256": thresholds["thresholds_sha256"], "tiers": tiers}; artifact["tiers_sha256"] = digest({k:v for k,v in artifact.items() if k != "tiers_sha256"}); return artifact
+
+def validate_tier_artifact(artifact: Mapping[str, Any]) -> None:
+    require(set(artifact) == {"schema", "protocol_id", "tier_plan_sha256", "thresholds_sha256", "tiers", "tiers_sha256"}, "bad tier top-level schema")
+    require(artifact["schema"] == TIER_SCHEMA and artifact["protocol_id"] == PROTOCOL_ID, "bad tier artifact")
+    require(artifact["tiers_sha256"] == digest({k:v for k,v in artifact.items() if k != "tiers_sha256"}), "tier artifact digest mismatch")
+    seen=set()
+    for row in artifact["tiers"]:
+        require("case_id" in row and "tier" in row and "decision" in row, "bad tier row schema")
+        require(row["case_id"] not in seen, "duplicate tier row")
+        seen.add(row["case_id"])
+
 
 def assigned_runs(plan: Mapping[str, Any], shard_index: int, shard_count: int) -> list[Mapping[str, Any]]:
     genuine_int(shard_index, "shard_index", minimum=0); genuine_int(shard_count, "shard_count", minimum=1); require(shard_index < shard_count, "shard_index must be < shard_count")
     return [run for idx, run in enumerate(plan["runs"]) if idx % shard_count == shard_index]
 def merge_shards(plan: Mapping[str, Any], paths: Sequence[Path]) -> list[dict[str, Any]]:
-    all_records: list[dict[str, Any]] = []
-    for path in paths: all_records.extend(read_jsonl(path))
-    validate_results(plan, all_records); return all_records
+    records_by_identity: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for path in paths:
+        for record in read_jsonl(path):
+            ident = result_identity(record)
+            require(ident not in records_by_identity, "duplicate or overlapping shard record")
+            records_by_identity[ident] = record
+    validate_results(plan, list(records_by_identity.values()))
+    ordered = []
+    for run in plan["runs"]:
+        ident = run_identity(run); require(ident in records_by_identity, "missing shard record")
+        ordered.append(records_by_identity[ident])
+    return ordered
 
 def make_fixture_manifest() -> dict[str, Any]:
     records = [
@@ -387,10 +527,10 @@ def make_fixture_manifest() -> dict[str, Any]:
 
 def smoke(output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True); manifest = make_fixture_manifest(); write_json(output_dir/"fixture_manifest.json", manifest)
-    fit_plan = build_threshold_fit_plan(manifest); write_json(output_dir/"threshold_fit_plan.json", fit_plan)
+    fit_plan = build_threshold_fit_plan(manifest, profile_id=FIXTURE_PROFILE_ID); write_json(output_dir/"threshold_fit_plan.json", fit_plan)
     fit_runs = assigned_runs(fit_plan, 0, 1); fit_records = [execute_run(run, fit_plan) for run in fit_runs]; write_jsonl(output_dir/"threshold_fit_results.jsonl", fit_records)
     thresholds = fit_thresholds(manifest, fit_plan, fit_records); write_json(output_dir/"thresholds.json", thresholds)
-    tier_plan = build_tier_reference_plan(manifest, thresholds); write_json(output_dir/"tier_reference_plan.json", tier_plan)
+    tier_plan = build_tier_reference_plan(manifest, thresholds, profile_id=FIXTURE_PROFILE_ID); write_json(output_dir/"tier_reference_plan.json", tier_plan)
     tier_records = [execute_run(run, tier_plan) for run in tier_plan["runs"] if not (run["algorithm_id"] == CP_SAT and dependency_versions()["ortools"] is None)]
     write_jsonl(output_dir/"tier_reference_results.jsonl", tier_records)
     # For smoke without OR-Tools, validate the partial operational shard and skip final tier artifact.
@@ -409,12 +549,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     a=sub.add_parser("summary"); a.add_argument("tiers")
     a=sub.add_parser("smoke"); a.add_argument("--output-dir", required=True)
     args = p.parse_args(argv)
-    if args.cmd == "threshold-fit-plan": write_json(Path(args.output), build_threshold_fit_plan(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture))); return 0
+    if args.cmd == "threshold-fit-plan": write_json(Path(args.output), build_threshold_fit_plan(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), profile_id=FIXTURE_PROFILE_ID if args.allow_fixture else PRODUCTION_PROFILE_ID)); return 0
     if args.cmd == "fit-thresholds": write_json(Path(args.output), fit_thresholds(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), read_json(Path(args.plan)), read_jsonl(Path(args.results)))); return 0
-    if args.cmd == "tier-reference-plan": write_json(Path(args.output), build_tier_reference_plan(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), read_json(Path(args.thresholds)))); return 0
+    if args.cmd == "tier-reference-plan": write_json(Path(args.output), build_tier_reference_plan(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), read_json(Path(args.thresholds)), profile_id=FIXTURE_PROFILE_ID if args.allow_fixture else PRODUCTION_PROFILE_ID)); return 0
     if args.cmd == "run-shard":
-        load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture); plan = read_json(Path(args.plan)); validate_plan(plan);
-        if plan["schema"] == TIER_PLAN_SCHEMA: require(args.thresholds is not None, "tier/reference shards require threshold artifact"); validate_threshold_artifact(read_json(Path(args.thresholds)))
+        manifest = load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture); plan = read_json(Path(args.plan)); validate_plan_against_manifest(plan, manifest);
+        if plan["schema"] == TIER_PLAN_SCHEMA: require(args.thresholds is not None, "tier/reference shards require threshold artifact"); threshold_artifact = read_json(Path(args.thresholds)); validate_threshold_artifact(threshold_artifact, manifest=manifest); require(plan.get("thresholds_sha256") == threshold_artifact["thresholds_sha256"], "plan/threshold artifact mismatch")
         runs = assigned_runs(plan, args.shard_index, args.shard_count); require(runs, "assigned shard is empty"); write_jsonl(Path(args.output), [execute_run(run, plan) for run in runs]); return 0
     if args.cmd == "validate-results":
         plan = read_json(Path(args.plan)); records=[]
@@ -425,7 +565,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.cmd == "validate-tiers": write_json(Path(args.output), validate_tiers(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), read_json(Path(args.plan)), read_json(Path(args.thresholds)), read_jsonl(Path(args.results)))); return 0
     if args.cmd == "merge-shards": write_jsonl(Path(args.output), merge_shards(read_json(Path(args.plan)), [Path(p) for p in args.shards])); return 0
     if args.cmd == "summary":
-        tiers = read_json(Path(args.tiers))["tiers"]; print(json.dumps({tier: sum(1 for row in tiers if row["tier"] == tier) for tier in sorted({row["tier"] for row in tiers})}, sort_keys=True)); return 0
+        artifact = read_json(Path(args.tiers)); validate_tier_artifact(artifact); tiers = artifact["tiers"]; print(json.dumps({tier: sum(1 for row in tiers if row["tier"] == tier) for tier in sorted({row["tier"] for row in tiers})}, sort_keys=True)); return 0
     if args.cmd == "smoke": print(json.dumps(smoke(Path(args.output_dir)), sort_keys=True)); return 0
     return 2
 
