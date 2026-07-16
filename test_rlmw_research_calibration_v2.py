@@ -8,9 +8,9 @@ class CalibrationV2OperationalTests(unittest.TestCase):
         man=cal.make_fixture_manifest(); fit=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
         fit_records=[cal.execute_run(r, fit) for r in fit['runs']]
         thresholds=cal.fit_thresholds(man, fit, fit_records)
-        tier=cal.build_tier_reference_plan(man, thresholds, profile_id=cal.FIXTURE_PROFILE_ID)
+        tier=cal.build_tier_reference_plan(man, thresholds, profile_id=cal.FIXTURE_PROFILE_ID, fit_plan=fit, fit_records=fit_records)
         tier_records=[cal.execute_run(r, tier) for r in tier['runs']]
-        tiers=cal.validate_tiers(man, tier, thresholds, tier_records)
+        tiers=cal.validate_tiers(man, tier, thresholds, tier_records, fit_plan=fit, fit_records=fit_records)
         return man,fit,fit_records,thresholds,tier,tier_records,tiers
     def test_real_two_stage_flow_and_no_w_in_fit(self):
         man,fit,fit_records,thresholds,tier,tier_records,tiers=self.flow()
@@ -29,10 +29,7 @@ class CalibrationV2OperationalTests(unittest.TestCase):
             h=['1'+'0'*(n-1)]
             records.append({'case_id':f'prod-n{n}','H_rows':h,'public_h_sha256':cal.isd_v2.public_h_sha256(h),'n':n,'family_id':'exact-control','validation':{'known_distance':{'distance':1}}})
         man={'manifest_kind':'calibration_fixture_manifest','candidate_manifest_digest':'e'*64,'configuration_digest':cal.corpus_v2.config_digest(),'records':records}
-        prod=cal.build_threshold_fit_plan(man)
-        self.assertEqual(prod['profile_id'], cal.PRODUCTION_PROFILE_ID)
-        self.assertTrue(all(r['budget']==(1<<18) for r in prod['runs']))
-        self.assertTrue(all(r['algorithm_config'].get('candidate_budget_adapter', r['algorithm_config'].get('candidate_budget')) in (1<<18, None) or r['algorithm_id']==cal.STERN for r in prod['runs']))
+        with self.assertRaises(cal.CalibrationV2Error): cal.build_threshold_fit_plan(man)
         fix=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
         self.assertEqual(fix['profile_id'], cal.FIXTURE_PROFILE_ID)
         self.assertTrue(all(r['budget']==cal.FIXTURE_BUDGETS[-1] for r in fix['runs']))
@@ -71,6 +68,21 @@ class CalibrationV2OperationalTests(unittest.TestCase):
         with self.assertRaises(cal.CalibrationV2Error): cal.validate_result_record(badr, plan=fit)
         badt=copy.deepcopy(thresholds); badt['thresholds'][0]['W']=False; badt['thresholds_sha256']=cal.digest({k:v for k,v in badt.items() if k!='thresholds_sha256'})
         with self.assertRaises(cal.CalibrationV2Error): cal.validate_threshold_artifact(badt)
+    def test_authoritative_replay_rejects_rehashed_semantic_tampering(self):
+        man, fit, fit_records, thresholds, tier, tier_records, tiers = self.flow()
+        cal.validate_threshold_artifact(thresholds, manifest=man, plan=fit, records=fit_records)
+        cal.validate_tier_artifact(tiers, manifest=man, plan=tier, thresholds=thresholds,
+                                   records=tier_records, fit_plan=fit, fit_records=fit_records)
+        bad = copy.deepcopy(thresholds); bad['thresholds'][0]['W'] = 99
+        bad['thresholds_sha256'] = cal.digest({k:v for k,v in bad.items() if k != 'thresholds_sha256'})
+        with self.assertRaises(cal.CalibrationV2Error):
+            cal.validate_threshold_artifact(bad, manifest=man, plan=fit, records=fit_records)
+        bad_tier = copy.deepcopy(tiers); bad_tier['tiers'][0]['decision'] = 'incomplete'
+        bad_tier['tiers_sha256'] = cal.digest({k:v for k,v in bad_tier.items() if k != 'tiers_sha256'})
+        with self.assertRaises(cal.CalibrationV2Error):
+            cal.validate_tier_artifact(bad_tier, manifest=man, plan=tier, thresholds=thresholds,
+                                       records=tier_records, fit_plan=fit, fit_records=fit_records)
+
     def test_partial_phase_validation_and_cp_sat_separation(self):
         man,fit,fit_records,thresholds,tier,tier_records,_=self.flow()
         cal.validate_results(fit, fit_records[:3], allow_partial=True)

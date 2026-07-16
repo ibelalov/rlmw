@@ -102,6 +102,9 @@ jobs:
           cmp /tmp/rlmw_cal_v2_a/tiers.json /tmp/rlmw_cal_v2_b/tiers.json
           python rlmw_research_calibration_v2.py validate-results /tmp/rlmw_cal_v2_a/threshold_fit_plan.json /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl --summary
           python rlmw_research_calibration_v2.py validate-results /tmp/rlmw_cal_v2_a/tier_reference_plan.json /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl --summary
+          python rlmw_research_calibration_v2.py validate-tiers /tmp/rlmw_cal_v2_a/fixture_manifest.json /tmp/rlmw_cal_v2_a/tier_reference_plan.json /tmp/rlmw_cal_v2_a/thresholds.json /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl --fit-plan /tmp/rlmw_cal_v2_a/threshold_fit_plan.json --fit-results /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl --allow-fixture --output /tmp/rlmw_cal_v2_a/tiers-replayed.json
+          cmp /tmp/rlmw_cal_v2_a/tiers.json /tmp/rlmw_cal_v2_a/tiers-replayed.json
+          python rlmw_research_calibration_v2.py summary /tmp/rlmw_cal_v2_a/tiers.json --manifest /tmp/rlmw_cal_v2_a/fixture_manifest.json --tier-plan /tmp/rlmw_cal_v2_a/tier_reference_plan.json --thresholds /tmp/rlmw_cal_v2_a/thresholds.json --tier-results /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl --fit-plan /tmp/rlmw_cal_v2_a/threshold_fit_plan.json --fit-results /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl --allow-fixture
           git diff --check
           test -z "$(git ls-files 'rlmw_calibration_v2_results.jsonl' '*calibration*v2*.jsonl' '*thresholds*.json' '*tiers*.json' --exclude-standard)"
 

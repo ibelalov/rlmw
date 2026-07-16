@@ -17,9 +17,7 @@ from `rlmw_research_corpus_v2.py`. Full validation requires:
 - the manifest's protected `candidate_manifest_digest`;
 - a concrete source commit.
 
-Every planned and validated run is bound to the candidate-manifest digest, public
-H hash, calibration source commit, module/config digests, algorithm ID, seed
-role/index, budget, phase, and solver stratum.
+Every plan, result, threshold artifact, and tier artifact is bound to manifest kind, profile, frozen budget tuple, candidate-manifest/config digests, public H hash, calibration source commit, module/dependency digests, algorithm configuration, seed role/index, phase, and solver stratum. Production and fixture profiles are mutually exclusive: fixture evidence requires explicit `--allow-fixture` and cannot validate as production evidence.
 
 ## Solver-facing boundary
 
@@ -67,14 +65,14 @@ python rlmw_research_calibration_v2.py threshold-fit-plan candidate_pool_manifes
 python rlmw_research_calibration_v2.py run-shard candidate_pool_manifest.json /tmp/rlmw-cal-v2/fit-plan.json --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/fit-shard-000.jsonl
 python rlmw_research_calibration_v2.py validate-results /tmp/rlmw-cal-v2/fit-plan.json /tmp/rlmw-cal-v2/fit-results.jsonl --summary
 python rlmw_research_calibration_v2.py fit-thresholds candidate_pool_manifest.json /tmp/rlmw-cal-v2/fit-plan.json /tmp/rlmw-cal-v2/fit-results.jsonl --output /tmp/rlmw-cal-v2/thresholds.json
-python rlmw_research_calibration_v2.py tier-reference-plan candidate_pool_manifest.json /tmp/rlmw-cal-v2/thresholds.json --output /tmp/rlmw-cal-v2/tier-plan.json
-python rlmw_research_calibration_v2.py run-shard candidate_pool_manifest.json /tmp/rlmw-cal-v2/tier-plan.json --thresholds /tmp/rlmw-cal-v2/thresholds.json --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/tier-shard-000.jsonl
-python rlmw_research_calibration_v2.py validate-tiers candidate_pool_manifest.json /tmp/rlmw-cal-v2/tier-plan.json /tmp/rlmw-cal-v2/thresholds.json /tmp/rlmw-cal-v2/tier-results.jsonl --output /tmp/rlmw-cal-v2/tiers.json
-python rlmw_research_calibration_v2.py summary /tmp/rlmw-cal-v2/tiers.json
+python rlmw_research_calibration_v2.py tier-reference-plan candidate_pool_manifest.json /tmp/rlmw-cal-v2/thresholds.json --fit-plan /tmp/rlmw-cal-v2/fit-plan.json --fit-results /tmp/rlmw-cal-v2/fit-results.jsonl --output /tmp/rlmw-cal-v2/tier-plan.json
+python rlmw_research_calibration_v2.py run-shard candidate_pool_manifest.json /tmp/rlmw-cal-v2/tier-plan.json --thresholds /tmp/rlmw-cal-v2/thresholds.json --fit-plan /tmp/rlmw-cal-v2/fit-plan.json --fit-results /tmp/rlmw-cal-v2/fit-results.jsonl --shard-index 0 --shard-count 16 --output /tmp/rlmw-cal-v2/tier-shard-000.jsonl
+python rlmw_research_calibration_v2.py validate-tiers candidate_pool_manifest.json /tmp/rlmw-cal-v2/tier-plan.json /tmp/rlmw-cal-v2/thresholds.json /tmp/rlmw-cal-v2/tier-results.jsonl --fit-plan /tmp/rlmw-cal-v2/fit-plan.json --fit-results /tmp/rlmw-cal-v2/fit-results.jsonl --output /tmp/rlmw-cal-v2/tiers.json
+python rlmw_research_calibration_v2.py summary /tmp/rlmw-cal-v2/tiers.json --manifest candidate_pool_manifest.json --tier-plan /tmp/rlmw-cal-v2/tier-plan.json --thresholds /tmp/rlmw-cal-v2/thresholds.json --tier-results /tmp/rlmw-cal-v2/tier-results.jsonl --fit-plan /tmp/rlmw-cal-v2/fit-plan.json --fit-results /tmp/rlmw-cal-v2/fit-results.jsonl
 python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw-cal-v2-smoke
 ```
 
-The first stage fits thresholds from solver-disabled evidence only; the second stage plans tier-validation and CP-SAT reference runs only from a validated threshold artifact. `run-shard` executes the assigned real v2 adapters and refuses to overwrite an existing shard output. `validate-results`
+The first stage fits thresholds from solver-disabled evidence only. `tier-reference-plan`, `validate-tiers`, and `summary` perform authoritative replay: they require the complete fit plan/results and complete tier plan/results, then recompute every decision-bearing threshold and tier field. A self-recomputed artifact digest is only an integrity checksum and is never sufficient evidence. The second stage plans tier-validation and CP-SAT reference runs only from a validated threshold artifact. `run-shard` executes the assigned real v2 adapters and refuses to overwrite an existing shard output. `validate-results`
 detects missing, duplicate, extra, cross-phase, wrong-budget, and wrong-seed
 records against the pre-enumerated plan.
 
