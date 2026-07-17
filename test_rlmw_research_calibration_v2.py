@@ -4,6 +4,20 @@ from pathlib import Path
 import rlmw_research_calibration_v2 as cal
 
 class CalibrationV2OperationalTests(unittest.TestCase):
+    def rehash(self, record):
+        record['record_sha256'] = cal.digest({k: v for k, v in record.items() if k != 'record_sha256'})
+
+    def set_incumbent_weight(self, record, weight):
+        """Keep a result witness-backed while changing its observed incumbent."""
+        rows, n = cal.v1.parse_h_rows(record['H_rows'])
+        word = (1 << weight) - 1
+        self.assertEqual(cal.v1.verify_nonzero_kernel_word(rows, n, word), weight)
+        bits = cal.v1.word_to_bits(word, n)
+        record.update({'best_candidate_bits': bits, 'best_candidate_sha256': cal.v1.candidate_sha256(bits),
+                       'best_weight': weight, 'witness_verified': True,
+                       'threshold_hit': record['W'] is not None and weight <= record['W']})
+        self.rehash(record)
+
     def flow(self):
         man=cal.make_fixture_manifest(); fit=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
         fit_records=[cal.execute_run(r, fit) for r in fit['runs']]
@@ -93,14 +107,87 @@ class CalibrationV2OperationalTests(unittest.TestCase):
     def test_percentiles_and_hard_gap_workflow_boundary(self):
         self.assertEqual(cal.nearest_rank([10,20,30,40,50], .40),20)
         self.assertEqual(cal.lower_median([4,1,3,2]),2)
-        man, fit, fit_records, thresholds, tier, tier_records, _ = self.flow()
-        # Alter authoritative evidence rather than repeating policy arithmetic:
-        # a far incumbent rejects the hard rule, while the original workflow
-        # remains accepted/replayable for its actual fixture cases.
-        self.assertTrue(any(row['hard_gap_ok'] for row in cal.validate_tiers(man, tier, thresholds, tier_records, fit_plan=fit, fit_records=fit_records)['tiers'] if row['W'] is not None))
-        target = next(r for r in tier_records if r['solver_stratum'] == cal.SOLVER_DISABLED and r['budget'] == tier['budgets'][-1])
-        bad = copy.deepcopy(target); bad['best_weight'] = 999; bad['record_sha256'] = cal.digest({k:v for k,v in bad.items() if k != 'record_sha256'})
-        with self.assertRaises(cal.CalibrationV2Error): cal.validate_tiers(man, tier, thresholds, [bad if r is target else r for r in tier_records], fit_plan=fit, fit_records=fit_records)
+        # A zero check row makes every nonzero bit vector a valid witness. This
+        # permits an end-to-end boundary test with internally valid evidence.
+        h = ['0' * 20]
+        man = {'manifest_kind': 'calibration_fixture_manifest', 'candidate_manifest_digest': 'a' * 64,
+               'configuration_digest': cal.corpus_v2.config_digest(),
+               'records': [{'case_id': 'hard-gap-unknown', 'H_rows': h,
+                            'public_h_sha256': cal.isd_v2.public_h_sha256(h), 'n': 20,
+                            'family_id': 'unknown', 'validation': {}}]}
+        fit = cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
+        fit_records = [cal.execute_run(run, fit) for run in fit['runs']]
+        for record in fit_records: self.set_incumbent_weight(record, 15)
+        thresholds = cal.fit_thresholds(man, fit, fit_records)
+        self.assertEqual(thresholds['thresholds'][0]['W'], 15)
+        tier = cal.build_tier_reference_plan(man, thresholds, profile_id=cal.FIXTURE_PROFILE_ID,
+                                             fit_plan=fit, fit_records=fit_records)
+
+        def tier_evidence(hit_weight):
+            # Tier policy deliberately ignores solver-assisted records. Use the
+            # producer's dependency-normalization shape here so this policy
+            # test cannot spend the frozen 60/600-second reference limits.
+            records = []
+            for run in tier['runs']:
+                if run['algorithm_id'] != cal.CP_SAT:
+                    records.append(cal.execute_run(run, tier))
+                else:
+                    rows, n = cal.v1.parse_h_rows(run['H_rows'])
+                    records.append(cal.normalize_dependency_unavailable(
+                        run, tier, rank=cal.v1.gf2_rank_bit_rows(rows, n), runtime=0.0,
+                        error='test dependency unavailable'))
+            max_hits = 0
+            for record in records:
+                if record['solver_stratum'] != cal.SOLVER_DISABLED: continue
+                weight = 16
+                if record['budget'] == tier['budgets'][-1] and max_hits < 4:
+                    weight = hit_weight; max_hits += 1
+                self.set_incumbent_weight(record, weight)
+            return records
+
+        passing = cal.validate_tiers(man, tier, thresholds, tier_evidence(13), fit_plan=fit, fit_records=fit_records)['tiers'][0]
+        failing = cal.validate_tiers(man, tier, thresholds, tier_evidence(15), fit_plan=fit, fit_records=fit_records)['tiers'][0]
+        self.assertTrue(passing['hard_gap_ok'])
+        self.assertEqual((passing['tier'], passing['reason']), ('hard_calibrated', 'hard_rule'))
+        self.assertFalse(failing['hard_gap_ok'])
+        self.assertEqual((failing['tier'], failing['reason']), ('calibration_incomplete', 'tier_rule_not_satisfied'))
+
+    def test_cp_sat_result_contract_rejects_rehashed_semantic_tampering(self):
+        _, _, _, _, _, tier_records, _ = self.flow()
+        source = next(record for record in tier_records if record['algorithm_id'] == cal.CP_SAT)
+        # The dependency-unavailable record is a real producer output on
+        # minimal environments; every protected field is independently checked.
+        if source['termination_reason'] == 'dependency_unavailable':
+            cal.validate_result_record(source)
+            for field, value in [('solver_calls', 1), ('solver_status', 'UNKNOWN'),
+                                 ('solver_status_raw', 'UNKNOWN'), ('completed_budget', True),
+                                 ('resource_limit', False), ('threshold_infeasibility_certified', True),
+                                 ('W', None), ('threshold_hit', True), ('error', None)]:
+                forged = copy.deepcopy(source); forged[field] = value; self.rehash(forged)
+                with self.assertRaises(cal.CalibrationV2Error): cal.validate_result_record(forged)
+        # Exercise producer's available outcomes too, using a real kernel word.
+        rows, n = cal.v1.parse_h_rows(source['H_rows']); word = next(w for w in range(1, 1 << n)
+                                                               if cal.v1.syndrome_is_zero(rows, w) and w.bit_count() <= source['W'])
+        bits = cal.v1.word_to_bits(word, n); weight = cal.v1.verify_nonzero_kernel_word(rows, n, word)
+        feasible = copy.deepcopy(source)
+        feasible.update({'termination_reason': 'solver_feasible', 'completed_budget': False, 'resource_limit': False,
+                         'error': None, 'solver_calls': 1, 'solver_status': 'FEASIBLE', 'solver_status_raw': 'OPTIMAL',
+                         'threshold_infeasibility_certified': False, 'candidate_evaluations': 1,
+                         'objective_evaluations': 1, 'exact_verifications': 1, 'valid_codewords_seen': 1,
+                         'threshold_witnesses_seen': 1, 'best_candidate_bits': bits,
+                         'best_candidate_sha256': cal.v1.candidate_sha256(bits), 'best_weight': weight,
+                         'witness_verified': True, 'threshold_hit': True})
+        self.rehash(feasible); cal.validate_result_record(feasible)
+        for status, raw, termination, certified in [('INFEASIBLE', 'INFEASIBLE', 'solver_infeasible', True),
+                                                     ('UNKNOWN', 'UNKNOWN', 'solver_unknown_or_limit', False)]:
+            record = copy.deepcopy(feasible)
+            record.update({'termination_reason': termination, 'solver_status': status, 'solver_status_raw': raw,
+                           'threshold_infeasibility_certified': certified, 'candidate_evaluations': 0,
+                           'objective_evaluations': 0, 'exact_verifications': 0, 'valid_codewords_seen': 0,
+                           'threshold_witnesses_seen': 0, 'best_candidate_bits': None,
+                           'best_candidate_sha256': None, 'best_weight': None, 'witness_verified': False,
+                           'threshold_hit': False})
+            self.rehash(record); cal.validate_result_record(record)
 
     def test_tampering_rejections(self):
         man,fit,fit_records,thresholds,tier,tier_records,_=self.flow()

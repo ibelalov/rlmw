@@ -408,6 +408,36 @@ def validate_result_record(record: Mapping[str, Any], *, plan: Mapping[str, Any]
         require(record["information_sets_accepted"] + record["singular_information_sets"] == record["information_set_attempts"], "information-set accounting mismatch")
         require(record["completed_budget"] == (record["candidate_evaluations"] == record["budget"] and record["termination_reason"] == "candidate_budget_exhausted"), "completed_budget semantics mismatch")
         require(record["resource_limit"] == (not record["completed_budget"]), "solver-disabled resource-limit semantics mismatch")
+    else:
+        # This is deliberately the contract of run_cp_sat_threshold_reference(),
+        # not a generic interpretation of CP-SAT statuses. That adapter makes
+        # one Solve call, exposes at most its returned witness, and reports
+        # UNKNOWN without turning it into an infeasibility or resource claim.
+        require(record["phase"] == REFERENCE_PHASE and record["W"] is not None, "CP-SAT reference requires a threshold")
+        require(record["completed_budget"] is False, "CP-SAT does not complete a candidate budget")
+        require(record["information_set_attempts"] == record["information_sets_accepted"] == record["singular_information_sets"] == 0, "CP-SAT information-set counters must be zero")
+        if record["termination_reason"] == "dependency_unavailable":
+            require(record["solver_calls"] == 0 and record["solver_status"] == "DEPENDENCY_UNAVAILABLE" and record["solver_status_raw"] is None, "CP-SAT dependency status mismatch")
+            require(record["resource_limit"] is True and isinstance(record["error"], str) and record["error"], "CP-SAT dependency error mismatch")
+            require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["valid_codewords_seen"] == record["threshold_witnesses_seen"] == 0, "CP-SAT dependency counters must be zero")
+            require(record["best_candidate_bits"] is None and record["threshold_hit"] is False and record["threshold_infeasibility_certified"] is False, "CP-SAT dependency outcome mismatch")
+        else:
+            require(record["solver_calls"] == 1 and record["error"] is None and isinstance(record["solver_status_raw"], str) and record["solver_status_raw"], "CP-SAT call/status provenance mismatch")
+            if record["termination_reason"] == "solver_feasible":
+                require(record["solver_status"] == "FEASIBLE" and record["solver_status_raw"] in {"OPTIMAL", "FEASIBLE"}, "CP-SAT feasible status mismatch")
+                require(record["resource_limit"] is False and record["threshold_infeasibility_certified"] is False and record["threshold_hit"] is True, "CP-SAT feasible flags mismatch")
+                require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["valid_codewords_seen"] == record["threshold_witnesses_seen"] == 1, "CP-SAT feasible counters mismatch")
+                require(record["best_candidate_bits"] is not None, "CP-SAT feasible witness missing")
+            elif record["termination_reason"] == "solver_infeasible":
+                require(record["solver_status"] == "INFEASIBLE" and record["solver_status_raw"] == "INFEASIBLE", "CP-SAT infeasible status mismatch")
+                require(record["resource_limit"] is False and record["threshold_infeasibility_certified"] is True and record["threshold_hit"] is False, "CP-SAT infeasible flags mismatch")
+                require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["valid_codewords_seen"] == record["threshold_witnesses_seen"] == 0 and record["best_candidate_bits"] is None, "CP-SAT infeasible outcome mismatch")
+            elif record["termination_reason"] == "solver_unknown_or_limit":
+                require(record["solver_status"] == "UNKNOWN" and record["solver_status_raw"] == "UNKNOWN", "CP-SAT unknown status mismatch")
+                require(record["resource_limit"] is False and record["threshold_infeasibility_certified"] is False and record["threshold_hit"] is False, "CP-SAT unknown flags mismatch")
+                require(record["candidate_evaluations"] == record["objective_evaluations"] == record["exact_verifications"] == record["valid_codewords_seen"] == record["threshold_witnesses_seen"] == 0 and record["best_candidate_bits"] is None, "CP-SAT unknown outcome mismatch")
+            else:
+                fail("unknown CP-SAT termination reason")
     if record["completed_budget"]: require(record["resource_limit"] is False, "completed resource-limit mismatch")
     if plan is not None:
         require(record["plan_sha256"] == plan["plan_sha256"], "record bound to wrong plan")

@@ -52,6 +52,16 @@ deterministic time and 600 seconds / `1e8` deterministic time, both with
 equal-budget summaries. `INFEASIBLE` remains a statement about the stated
 threshold model only, not a minimum-distance claim.
 
+CP-SAT normalization follows the producing adapter exactly. An available call
+records one solver call: `FEASIBLE` (raw `FEASIBLE` or `OPTIMAL`) has one
+exactly verified threshold witness; `INFEASIBLE` (raw `INFEASIBLE`) has no
+witness and sets only the stated-model threshold-infeasibility flag; and
+`UNKNOWN` (raw `UNKNOWN`) has neither witness nor certificate. These outcomes
+do not complete a solver-disabled candidate budget and are not included in its
+resource-limit rates. If OR-Tools is unavailable, the normalized result has
+zero calls, `DEPENDENCY_UNAVAILABLE`, a nonempty error, and a resource limit;
+all available CP-SAT outcomes have `error = null`.
+
 ## Commands
 
 Generated outputs should be directed outside the repository, for example under
