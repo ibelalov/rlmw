@@ -121,12 +121,29 @@ def validate_public_case(case: Mapping[str, Any]) -> None:
 def evaluator_metadata(rec: Mapping[str, Any]) -> dict[str, Any]:
     meta = {"family_id": rec.get("family_id"), "n": rec.get("n"), "certified_lower_bound": 1, "exact_distance": None, "planted_upper_bound": None, "is_planted": "planted" in str(rec.get("family_id", ""))}
     val = rec.get("validation", {}) if isinstance(rec.get("validation"), dict) else {}
-    if isinstance(val.get("known_distance"), dict): meta["exact_distance"] = val["known_distance"].get("distance")
     prov = rec.get("evaluator_only_provenance", {}) if isinstance(rec.get("evaluator_only_provenance"), dict) else {}
+    # Real generated controls carry their certificate only in protected,
+    # evaluator-only provenance.  Replay it from public H; never trust a
+    # synthetic validation field or an asserted distance.
+    if rec.get("parameter_stratum_id") in corpus_v2.CONTROL_STRATA:
+        cert = prov.get("certificate")
+        require(isinstance(cert, dict), "control lacks evaluator certificate")
+        H = corpus_v2.BinaryMatrix.from_row_strings(rec["H_rows"])
+        replayed = corpus_v2.replay_control_certificate(H, rec["parameter_stratum_id"])
+        require(cert == replayed, "control certificate replay mismatch")
+        distance = cert.get("exact_distance")
+        genuine_int(distance, "control exact distance", minimum=1)
+        require(cert.get("status") in ("CERTIFIED_EXACT_DISTANCE", "CERTIFIED_THEOREM_DISTANCE"), "control certificate lacks exact status")
+        if cert.get("status") == "CERTIFIED_EXACT_DISTANCE":
+            require(cert.get("finite_lower_bound") == distance and cert.get("finite_upper_bound") == distance, "inconsistent enumerated control certificate bounds")
+        meta["exact_distance"] = distance; meta["certified_lower_bound"] = distance
+    elif isinstance(val.get("known_distance"), dict):
+        # Fixtures retain their deliberately synthetic contract.
+        meta["exact_distance"] = val["known_distance"].get("distance")
     supp = prov.get("planted_witness_support")
     if isinstance(supp, list): meta["planted_upper_bound"] = len(supp)
     sc = val.get("small_circuit", {}) if isinstance(val.get("small_circuit"), dict) else {}
-    if isinstance(sc.get("cap"), int) and sc.get("status") == "PASS": meta["certified_lower_bound"] = sc["cap"] + 1
+    if isinstance(sc.get("cap"), int) and sc.get("status") == "PASS" and meta["exact_distance"] is None: meta["certified_lower_bound"] = sc["cap"] + 1
     return meta
 
 def algorithm_config(algorithm_id: str, *, budget: int, n: int, rank: int) -> dict[str, Any]:
@@ -169,9 +186,10 @@ def build_threshold_fit_plan(manifest: Mapping[str, Any], *, profile_id: str = P
     for rec in manifest["records"]:
         case = case_public(rec); validate_public_case(case); rows, n = v1.parse_h_rows(case["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n)
         for alg in SOLVER_DISABLED_ALGORITHMS:
-            cfg = algorithm_config(alg, budget=budgets[-1], n=n, rank=rank); cd = config_digest(cfg)
-            for seed_index in range(8):
-                runs.append({"run_schema": "fit-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": FIT_PHASE, "seed_role": FIT_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(FIT_ROLE, seed_index), "budget": budgets[-1]})
+            for budget in budgets:
+                cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
+                for seed_index in range(8):
+                    runs.append({"run_schema": "fit-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": FIT_PHASE, "seed_role": FIT_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(FIT_ROLE, seed_index), "budget": budget})
     plan = {"schema": FIT_PLAN_SCHEMA, **common, "profile_id": profile_id, "budgets": list(budgets), "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
 
 def threshold_map(thresholds: Mapping[str, Any]) -> dict[str, Any]: return {t["case_id"]: t for t in thresholds["thresholds"]}
@@ -238,7 +256,7 @@ def validate_run(run: Mapping[str, Any], *, plan_schema: str, profile_id: str = 
     validate_public_case({"case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"]})
     genuine_int(run["seed_index"], "seed_index", minimum=0, maximum=7); genuine_int(run["budget"], "budget", minimum=0)
     if plan_schema == FIT_PLAN_SCHEMA:
-        require(run["phase"] == FIT_PHASE and run["seed_role"] == FIT_ROLE and run["budget"] == budgets[-1], "bad fit phase/role/budget")
+        require(run["phase"] == FIT_PHASE and run["seed_role"] == FIT_ROLE and run["budget"] in budgets, "bad fit phase/role/budget")
         require("W" not in run, "threshold-fit run must not contain W")
         require(run["solver_stratum"] == SOLVER_DISABLED and run["algorithm_id"] in SOLVER_DISABLED_ALGORITHMS, "fit plan must be solver-disabled only")
     else:
@@ -472,17 +490,18 @@ def fit_thresholds(manifest: Mapping[str, Any], plan: Mapping[str, Any], records
     thresholds = []
     for crec in manifest["records"]:
         cid = crec["case_id"]; meta = evaluator_metadata(crec); rs = by_case.get(cid, [])
+        max_rs = [r for r in rs if r["budget"] == plan["budgets"][-1]]
         if meta["exact_distance"] is not None:
             W = genuine_int(meta["exact_distance"], "exact distance", minimum=0); source = "exact_control_replay"; artificial = False; decision = "threshold_frozen"
         elif meta["is_planted"] and meta["planted_upper_bound"] is not None:
             W = genuine_int(meta["planted_upper_bound"], "planted upper bound", minimum=1); source = "evaluator_planted_upper_bound"; artificial = True; decision = "threshold_frozen_artificial"
         else:
-            vals = [r["best_weight"] for r in rs if completed_incumbent(r)]; algs = {r["algorithm_id"] for r in rs if completed_incumbent(r)}; denom = len(SOLVER_DISABLED_ALGORITHMS)*8
+            vals = [r["best_weight"] for r in max_rs if completed_incumbent(r)]; algs = {r["algorithm_id"] for r in max_rs if completed_incumbent(r)}; denom = len(SOLVER_DISABLED_ALGORITHMS)*8
             if len(vals)/denom >= 0.5 and len(algs) >= 2:
                 W = nearest_rank(vals, 0.40); source = "solver_disabled_nearest_rank_40pct"; decision = "threshold_frozen"; artificial = False
             else:
                 W = None; source = "insufficient_availability"; decision = "calibration_incomplete"; artificial = False
-        thresholds.append({"case_id": cid, "public_h_sha256": crec["public_h_sha256"], "n": crec.get("n"), "W": W, "threshold_source": source, "decision": decision, "planted_threshold_artificial": artificial, "certified_lower_bound": meta["certified_lower_bound"], "exact_distance": meta["exact_distance"], "fit_denominator": len(SOLVER_DISABLED_ALGORITHMS)*8, "fit_available": sum(1 for r in rs if completed_incumbent(r)), "fit_contributing_algorithms": sorted({r["algorithm_id"] for r in rs if completed_incumbent(r)})})
+        thresholds.append({"case_id": cid, "public_h_sha256": crec["public_h_sha256"], "n": crec.get("n"), "W": W, "threshold_source": source, "decision": decision, "planted_threshold_artificial": artificial, "certified_lower_bound": meta["certified_lower_bound"], "exact_distance": meta["exact_distance"], "fit_denominator": len(SOLVER_DISABLED_ALGORITHMS)*8, "fit_available": sum(1 for r in max_rs if completed_incumbent(r)), "fit_contributing_algorithms": sorted({r["algorithm_id"] for r in max_rs if completed_incumbent(r)})})
     artifact = {"schema": THRESHOLD_SCHEMA, "protocol_id": PROTOCOL_ID, "manifest_kind": plan["manifest_kind"], "profile_id": plan["profile_id"], "budgets": plan["budgets"], "fit_plan_sha256": plan["plan_sha256"], "candidate_manifest_sha256": manifest_digest(manifest), "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "calibration_source_commit": plan["calibration_source_commit"], "module_digests": plan["module_digests"], "dependency_versions": plan["dependency_versions"], "fit_results_sha256": digest(list(records)), "thresholds": thresholds}; artifact["thresholds_sha256"] = digest({k:v for k,v in artifact.items() if k != "thresholds_sha256"}); return artifact
 
 def validate_threshold_artifact(artifact: Mapping[str, Any], *, manifest: Mapping[str, Any] | None = None, plan: Mapping[str, Any] | None = None, records: Sequence[Mapping[str, Any]] | None = None) -> None:

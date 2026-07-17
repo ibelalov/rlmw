@@ -225,6 +225,13 @@ The manifest stores canonical binary row strings, public `W` after acceptance, o
 
 Structural exact small-circuit replay is capped at column-subset weight 6 for unknown cases unless PR B changes the cap with review. The exact worst-case subset count for `n=240` is `sum(C(240,i), i=1..6) = 255,719,544,468`, so the implementation must use ordered meet-in-the-middle/XOR replay rather than naive enumeration and must record resource limits. Smoke validation covers 28 cases with rank, regeneration, hash, degree/density, no-duplicate, and small-circuit spot replay suitable for ordinary CI.
 
+The cap-6 meet-in-the-middle implementation stores half-subset syndromes and
+witness supports as exact packed integers, not tuple-valued syndromes. Its
+bounded `n=240` preflight reports the `sum(C(240,i), i=0..3)` half-subset count,
+runtime class, and conservative peak-memory estimate without generating a
+matrix or artifact; the accepted-profile default limit must accommodate that
+count.
+
 Calibration hardware is separately provisioned. Required calibration uses three inherited solver-disabled baselines, at least one stronger solver-disabled ISD family, and one solver-assisted CP-SAT reference, with budgets in Section 9. Expected pre-freeze calibration run records:
 
 - Threshold fitting, solver-disabled inherited: `192 cases * 3 algorithms * 4 budgets * 8 threshold seeds = 18432` records.

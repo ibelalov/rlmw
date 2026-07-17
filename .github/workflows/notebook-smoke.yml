@@ -69,6 +69,7 @@ jobs:
         run: |
           python -m py_compile rlmw_research_corpus_v2.py test_rlmw_research_corpus_v2.py
           python rlmw_research_corpus_v2.py self-test
+          python rlmw_research_corpus_v2.py small-circuit-preflight --n 240 --cap 6
           python -m unittest -v test_rlmw_research_corpus_v2.py
           python -O rlmw_research_corpus_v2.py self-test
           python -O -m unittest -v test_rlmw_research_corpus_v2.py

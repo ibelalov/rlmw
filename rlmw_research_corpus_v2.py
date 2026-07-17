@@ -24,6 +24,7 @@ GENERATOR_ID = "rlmw-research-corpus-v2-tooling-v2"
 RANDOM_DOMAIN = "rlmw-h-native-research-v2-random-v1"
 BASE_SEED = bytes.fromhex("726c6d772d682d6e61746976652d76322d63616e6469646174652d7631")
 HARD_SMALL_CIRCUIT_CAP = 6
+DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES = 2_500_000
 MAX_SPARSE_ATTEMPTS = 20000
 DUMMY_FINAL_EVAL_SEEDS = tuple(bytes.fromhex(f"d00df00d0000000000000000{i:08x}") for i in range(8))
 AUDIT_NOT_RUN = "AUDIT_NOT_RUN"
@@ -364,7 +365,7 @@ def _dense_control(stratum: str) -> BinaryMatrix:
     raise V2Error(f"failed to generate dense control {stratum}")
 
 
-def generate_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, int, Dict[str, Any]]:
+def generate_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Tuple[BinaryMatrix, int, Dict[str, Any]]:
     n, r, p, _ = DENSE_STRATA[stratum]
     threshold = int(math.floor(p * (1 << 64)))
     for attempt in range(require_uint(max_attempts, "max_attempts")):
@@ -446,7 +447,7 @@ def _edges_to_matrix(edges: Iterable[Tuple[int, int]], r: int, n: int) -> Binary
     return BinaryMatrix.from_rows(rows)
 
 
-def generate_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, int, Dict[str, Any]]:
+def generate_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Tuple[BinaryMatrix, int, Dict[str, Any]]:
     n, r, dv, dc = SPARSE_STRATA[stratum]
     if dv != 3 or dc != 6 or n * dv != r * dc:
         raise V2Error("unsupported sparse degree contract")
@@ -476,7 +477,7 @@ def _witness_support(stratum: str, n: int, weight: int, batch: int, slot: int, a
     return sorted(_ranked_indices(n, "planted_witness_v1", stratum, batch, slot, attempt, "planted_witness_coordinate")[:weight])
 
 
-def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
+def generate_planted_dense(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = 20000, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
     n, r, wp = PLANTED_DENSE_STRATA[stratum]
     for attempt in range(max_attempts):
         try:
@@ -545,7 +546,7 @@ def _apply_planted_transform(H: BinaryMatrix, stratum: str, batch: int, slot: in
     return BinaryMatrix.from_rows(rows), {"variant": variant, "coordinate_permutation": perm, "coordinate_permutation_inverse": inv, "row_operations": row_operations}
 
 
-def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
+def generate_planted_sparse(stratum: str, construction_batch_id: int, case_slot: int, max_attempts: int = MAX_SPARSE_ATTEMPTS, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Tuple[BinaryMatrix, List[int], int, Dict[str, Any], Dict[str, Any]]:
     n, r, wp = PLANTED_SPARSE_STRATA[stratum]
     for attempt in range(max_attempts):
         try:
@@ -618,7 +619,7 @@ def _has_four_cycle(H: BinaryMatrix) -> bool:
     return False
 
 
-def validate_matrix(H: BinaryMatrix, stratum: str, expected_rank: Optional[int] = None, small_circuit_cap: int = 0, require_audit_pass: bool = False, audit_resource_limit_entries: int = 2_000_000) -> Dict[str, Any]:
+def validate_matrix(H: BinaryMatrix, stratum: str, expected_rank: Optional[int] = None, small_circuit_cap: int = 0, require_audit_pass: bool = False, audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Dict[str, Any]:
     rows = H.as_lists(); m = len(rows); n = H.ncols
     if any(bit not in (0, 1) or isinstance(bit, bool) for row in rows for bit in row):
         raise V2Error("non-binary entry")
@@ -665,7 +666,26 @@ def _xor_cols(cols: Sequence[Tuple[int, ...]], indices: Tuple[int, ...]) -> Tupl
     return tuple(acc)
 
 
-def small_circuit_audit(H: BinaryMatrix, cap: int, resource_limit_entries: int = 2_000_000) -> Dict[str, Any]:
+def _packed_column_syndromes(H: BinaryMatrix) -> List[int]:
+    """Return exact column syndromes as bit-packed Python integers."""
+    return [sum((row.bits[j] << i) for i, row in enumerate(H.rows)) for j in range(H.ncols)]
+
+
+def _small_circuit_audit_reference(H: BinaryMatrix, cap: int) -> Dict[str, Any]:
+    """Tuple-syndrome reference retained for differential tests only."""
+    cols = _column_tuples(H); seen = {tuple([0] * len(H.rows)): tuple()}
+    for w in range(1, min(3, cap) + 1):
+        for comb in itertools.combinations(range(H.ncols), w):
+            x = _xor_cols(cols, comb)
+            if not any(x): return {"status": "FOUND_WITNESS", "cap": cap, "weight": w, "columns": list(comb)}
+            prev = seen.get(x)
+            if prev is not None and set(prev).isdisjoint(comb) and len(prev) + w <= cap:
+                return {"status": "FOUND_WITNESS", "cap": cap, "weight": len(prev) + w, "columns": sorted(prev + comb)}
+            if prev is None or w < len(prev): seen[x] = comb
+    return {"status": "PASS", "cap": cap}
+
+
+def small_circuit_audit(H: BinaryMatrix, cap: int, resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Dict[str, Any]:
     require_uint(cap, "small_circuit_cap")
     if cap > HARD_SMALL_CIRCUIT_CAP:
         return {"status": "RESOURCE_LIMIT", "cap": cap, "reason": "cap exceeds hard limit"}
@@ -676,19 +696,33 @@ def small_circuit_audit(H: BinaryMatrix, cap: int, resource_limit_entries: int =
     entries = sum(math.comb(n, w) for w in range(0, half + 1))
     if entries > resource_limit_entries:
         return {"status": "RESOURCE_LIMIT", "cap": cap, "estimated_entries": entries}
-    cols = _column_tuples(H)
-    seen: Dict[Tuple[int, ...], Tuple[int, ...]] = {tuple([0] * len(H.rows)): tuple()}
+    # Both keys and witnesses are packed integers.  This avoids allocating a
+    # tuple syndrome for each of the 2.3M n=240 half-subsets while preserving
+    # an exact, independently replayable XOR representation.
+    cols = _packed_column_syndromes(H)
+    seen: Dict[int, int] = {0: 0}
     for w in range(1, half + 1):
         for comb in itertools.combinations(range(n), w):
-            x = _xor_cols(cols, comb)
-            if not any(x):
+            x = 0; mask = 0
+            for j in comb: x ^= cols[j]; mask |= 1 << j
+            if x == 0:
                 return {"status": "FOUND_WITNESS", "cap": cap, "weight": w, "columns": list(comb)}
             prev = seen.get(x)
-            if prev is not None and set(prev).isdisjoint(comb) and len(prev) + len(comb) <= cap:
-                return {"status": "FOUND_WITNESS", "cap": cap, "weight": len(prev) + len(comb), "columns": sorted(prev + comb)}
-            if prev is None or len(comb) < len(prev):
-                seen[x] = comb
+            if prev is not None and not (prev & mask) and prev.bit_count() + w <= cap:
+                witness = prev | mask
+                return {"status": "FOUND_WITNESS", "cap": cap, "weight": witness.bit_count(), "columns": [j for j in range(n) if (witness >> j) & 1]}
+            if prev is None or w < prev.bit_count(): seen[x] = mask
     return {"status": "PASS", "cap": cap, "estimated_entries": entries}
+
+
+def small_circuit_audit_preflight(n: int = 240, cap: int = HARD_SMALL_CIRCUIT_CAP) -> Dict[str, Any]:
+    """Bounded planning estimate; it neither generates nor retains matrices."""
+    require_uint(n, "n"); require_uint(cap, "small_circuit_cap")
+    half = min(3, cap); entries = sum(math.comb(n, w) for w in range(half + 1))
+    return {"n": n, "cap": cap, "half_subset_entries": entries,
+            "syndrome_representation": "packed_python_int", "witness_representation": "packed_column_mask",
+            "estimated_peak_memory_bytes": entries * 96,
+            "runtime_expectation": "external calibration preflight; O(sum(C(n,i), i=0..3)) exact XOR insert/lookups"}
 
 
 def kernel_basis(H: BinaryMatrix) -> List[List[int]]:
@@ -826,7 +860,7 @@ def _audit_gate(H: BinaryMatrix, audit_cap: int, profile: str, audit_resource_li
         return True, audit
     raise V2Error(f"unknown audit status {audit.get('status')}")
 
-def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> Dict[str, Any]:
+def build_record(stratum: str, batch: int, slot: int, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> Dict[str, Any]:
     family = _family_for(stratum)
     witness = None; provenance: Dict[str, Any] = {}; attempt = 0; audit_override: Optional[Dict[str, Any]] = None
     if stratum in DENSE_STRATA:
@@ -1106,7 +1140,7 @@ def sparse_feasibility_report() -> Dict[str, int]:
     return report
 
 
-def generate_records(full: bool = False, smoke: bool = False, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = 2_000_000) -> List[Dict[str, Any]]:
+def generate_records(full: bool = False, smoke: bool = False, audit_cap: int = 0, profile: str = "preaudit", audit_resource_limit_entries: int = DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     if full:
         for stratum in CONTROL_STRATA:
@@ -1178,10 +1212,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("self-test")
     sub.add_parser("print-test-vectors")
-    g = sub.add_parser("generate-candidate-pool"); g.add_argument("--output-dir", required=True); g.add_argument("--full", action="store_true"); g.add_argument("--smoke", action="store_true"); g.add_argument("--profile", choices=["preaudit", "accepted"], default="preaudit"); g.add_argument("--audit-cap", type=int, default=None); g.add_argument("--audit-resource-limit-entries", type=int, default=2_000_000)
+    g = sub.add_parser("generate-candidate-pool"); g.add_argument("--output-dir", required=True); g.add_argument("--full", action="store_true"); g.add_argument("--smoke", action="store_true"); g.add_argument("--profile", choices=["preaudit", "accepted"], default="preaudit"); g.add_argument("--audit-cap", type=int, default=None); g.add_argument("--audit-resource-limit-entries", type=int, default=DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES)
     v = sub.add_parser("validate-candidate-pool"); v.add_argument("manifest"); v.add_argument("--full", action="store_true")
     s = sub.add_parser("summary"); s.add_argument("manifest")
     sub.add_parser("sparse-feasibility")
+    a = sub.add_parser("small-circuit-preflight", help="report bounded packed-audit runtime/memory expectations without generating matrices"); a.add_argument("--n", type=int, default=240); a.add_argument("--cap", type=int, default=HARD_SMALL_CIRCUIT_CAP)
     try:
         args = parser.parse_args(argv)
         if args.cmd == "self-test": print(json.dumps(self_test(), sort_keys=True)); return 0
@@ -1197,6 +1232,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for r in payload.get("records", []): statuses[r.get("structural_status", "?")] = statuses.get(r.get("structural_status", "?"), 0) + 1
             print(json.dumps({"records": len(payload.get("records", [])), "strata": counts, "splits": splits, "structural_statuses": statuses, "calibration_ready": payload.get("calibration_ready"), "digest": payload.get("candidate_manifest_digest")}, sort_keys=True)); return 0
         if args.cmd == "sparse-feasibility": print(json.dumps(sparse_feasibility_report(), sort_keys=True)); return 0
+        if args.cmd == "small-circuit-preflight": print(json.dumps(small_circuit_audit_preflight(args.n, args.cap), sort_keys=True)); return 0
     except (V2Error, OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
