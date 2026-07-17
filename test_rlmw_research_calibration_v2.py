@@ -59,12 +59,21 @@ class CalibrationV2OperationalTests(unittest.TestCase):
             merged=cal.merge_shards(fit,[out0,out1]); self.assertEqual(len(merged), len(fit['runs']))
             with self.assertRaises(cal.CalibrationV2Error): cal.merge_shards(fit,[out0,out0])
     def test_threshold_policies_unknown_complete_and_incomplete_tier_replay(self):
-        man, fit, fit_records, thresholds, *_ = self.flow()
+        man, fit, fit_records, thresholds, tier, tier_records, tiers = self.flow()
         by = {r['case_id']: r for r in thresholds['thresholds']}
         self.assertEqual(by['calv2-fixture-even4']['threshold_source'], 'exact_control_replay')
         self.assertFalse(by['calv2-fixture-even4']['planted_threshold_artificial'])
         self.assertEqual(by['calv2-fixture-planted5']['threshold_source'], 'evaluator_planted_upper_bound')
         self.assertTrue(by['calv2-fixture-planted5']['planted_threshold_artificial'])
+        cal.validate_tier_artifact(tiers, manifest=man, plan=tier, thresholds=thresholds,
+                                   records=tier_records, fit_plan=fit, fit_records=fit_records)
+        tier_by_case = {row['case_id']: row for row in tiers['tiers']}
+        self.assertEqual((tier_by_case['calv2-fixture-even4']['tier'],
+                          tier_by_case['calv2-fixture-even4']['reason']),
+                         ('control_exact', 'exact_control'))
+        self.assertEqual((tier_by_case['calv2-fixture-planted5']['tier'],
+                          tier_by_case['calv2-fixture-planted5']['reason']),
+                         ('planted_artificial', 'artificial_planted_threshold'))
 
         # Remove evaluator controls before planning: this is a genuine unknown
         # case, fitted from complete production-validator result records.
@@ -146,11 +155,78 @@ class CalibrationV2OperationalTests(unittest.TestCase):
             return records
 
         passing = cal.validate_tiers(man, tier, thresholds, tier_evidence(13), fit_plan=fit, fit_records=fit_records)['tiers'][0]
-        failing = cal.validate_tiers(man, tier, thresholds, tier_evidence(15), fit_plan=fit, fit_records=fit_records)['tiers'][0]
+        failing = cal.validate_tiers(man, tier, thresholds, tier_evidence(14), fit_plan=fit, fit_records=fit_records)['tiers'][0]
         self.assertTrue(passing['hard_gap_ok'])
         self.assertEqual((passing['tier'], passing['reason']), ('hard_calibrated', 'hard_rule'))
         self.assertFalse(failing['hard_gap_ok'])
         self.assertEqual((failing['tier'], failing['reason']), ('calibration_incomplete', 'tier_rule_not_satisfied'))
+
+    def test_complete_witness_backed_tier_policy_workflows(self):
+        """Exercise policy decisions only after the full authoritative replay."""
+        h = ['0' * 20]
+        manifest = {'manifest_kind': 'calibration_fixture_manifest', 'candidate_manifest_digest': 'b' * 64,
+                    'configuration_digest': cal.corpus_v2.config_digest(),
+                    'records': [{'case_id': 'tier-policy-unknown', 'H_rows': h,
+                                 'public_h_sha256': cal.isd_v2.public_h_sha256(h), 'n': 20,
+                                 'family_id': 'unknown', 'validation': {}}]}
+        fit = cal.build_threshold_fit_plan(manifest, profile_id=cal.FIXTURE_PROFILE_ID)
+        fit_records = [cal.execute_run(run, fit) for run in fit['runs']]
+        for record in fit_records:
+            self.set_incumbent_weight(record, 15)
+        thresholds = cal.fit_thresholds(manifest, fit, fit_records)
+        tier_plan = cal.build_tier_reference_plan(manifest, thresholds,
+                                                  profile_id=cal.FIXTURE_PROFILE_ID,
+                                                  fit_plan=fit, fit_records=fit_records)
+
+        def records_for(*, high_hits, disagreement=False, insufficient_iqr=False):
+            records = []
+            for run in tier_plan['runs']:
+                if run['algorithm_id'] == cal.CP_SAT:
+                    rows, n = cal.v1.parse_h_rows(run['H_rows'])
+                    records.append(cal.normalize_dependency_unavailable(
+                        run, tier_plan, rank=cal.v1.gf2_rank_bit_rows(rows, n), runtime=0.0,
+                        error='test dependency unavailable'))
+                else:
+                    records.append(cal.execute_run(run, tier_plan))
+            high_budget = tier_plan['budgets'][-1]
+            high = [r for r in records if r['solver_stratum'] == cal.SOLVER_DISABLED and r['budget'] == high_budget]
+            for record in records:
+                if record['solver_stratum'] == cal.SOLVER_DISABLED:
+                    self.set_incumbent_weight(record, 16)
+            for index, record in enumerate(high):
+                if disagreement:
+                    self.set_incumbent_weight(record, (10, 13, 16, 19)[index // 8])
+                elif index < high_hits:
+                    self.set_incumbent_weight(record, 13 + (index % 3))
+            if insufficient_iqr:
+                for record in high[7:]:
+                    record.update({'termination_reason': 'resource_limit', 'completed_budget': False,
+                                   'resource_limit': True, 'candidate_evaluations': 0,
+                                   'objective_evaluations': 0, 'exact_verifications': 0,
+                                   'valid_codewords_seen': 0, 'threshold_witnesses_seen': 0,
+                                   'best_candidate_bits': None, 'best_candidate_sha256': None,
+                                   'best_weight': None, 'witness_verified': False,
+                                   'threshold_hit': False})
+                    self.rehash(record)
+            return records
+
+        def assert_outcome(expected, **kwargs):
+            records = records_for(**kwargs)
+            artifact = cal.validate_tiers(manifest, tier_plan, thresholds, records,
+                                          fit_plan=fit, fit_records=fit_records)
+            cal.validate_tier_artifact(artifact, manifest=manifest, plan=tier_plan,
+                                       thresholds=thresholds, records=records,
+                                       fit_plan=fit, fit_records=fit_records)
+            row = artifact['tiers'][0]
+            self.assertEqual((row['tier'], row['reason']), expected)
+
+        assert_outcome(('easy_calibrated', 'easy_rule'), high_hits=24)
+        assert_outcome(('medium_calibrated', 'medium_rule'), high_hits=16)
+        assert_outcome(('hard_calibrated', 'hard_rule'), high_hits=8)
+        assert_outcome(('calibration_incomplete', 'algorithm_disagreement'), high_hits=16,
+                       disagreement=True)
+        assert_outcome(('calibration_incomplete', 'insufficient_incumbent_iqr'), high_hits=8,
+                       insufficient_iqr=True)
 
     def test_cp_sat_result_contract_rejects_rehashed_semantic_tampering(self):
         _, _, _, _, _, tier_records, _ = self.flow()
