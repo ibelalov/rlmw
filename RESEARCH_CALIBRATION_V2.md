@@ -36,8 +36,10 @@ The v2 calibration plan enumerates only these solver-disabled algorithms:
 - `lee_brickell_isd_v1`
 - `stern_dumer_collision_isd_v1`
 
-Budgets are `2^12`, `2^14`, `2^16`, and `2^18`. Threshold fitting uses only
-`threshold_fit_seed[0..7]` at budget `2^18` and has no `W`. Tier validation uses
+Budgets are `2^12`, `2^14`, `2^16`, and `2^18`. Threshold-fit plans enumerate
+all four budgets for complete, auditable run accounting, but threshold fitting
+uses only completed maximum-budget (`2^18`) records from
+`threshold_fit_seed[0..7]`; fit payloads have no `W`. Tier validation uses
 only `tier_validation_seed[0..7]` at all four budgets. `W` is not part of any
 threshold-fit public payload and therefore cannot influence fit trajectories.
 
@@ -84,6 +86,16 @@ python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw-cal-v2-smoke
 
 Threshold-fit and tier-reference plans have separate exact top-level schemas: only tier-reference plans carry a required SHA-256 `thresholds_sha256` binding. Plans reject missing and unknown fields. When fitting cannot establish an unknown-case threshold, tier planning emits no solver-facing tier runs for that case; authoritative replay still emits a full, schema-identical `calibration_incomplete` tier row with `W`, IQR, and upper bound set to `null`, rate/median maps empty, and boolean agreement/gap fields `false`.
 
+Generated Hamming, extended-Hamming, Reed--Muller, and exact-random controls
+carry certificates only in evaluator-only provenance. Calibration replays that
+certificate from the public `H`, rejects malformed or inconsistent replay, and
+sets both `W` and `certified_lower_bound` to the certified exact distance.
+
+For a complete 192-case production manifest, threshold fitting has
+`192 * 4 algorithms * 4 budgets * 8 seeds = 24,576` records; independent tier
+validation has another 24,576, and the two CP-SAT profiles have 1,536 reference
+records, for the normative total of **50,688** records.
+
 The first stage fits thresholds from solver-disabled evidence only. `tier-reference-plan`, `validate-tiers`, and `summary` perform authoritative replay: they require the complete fit plan/results and complete tier plan/results, then recompute every decision-bearing threshold and tier field. A self-recomputed artifact digest is only an integrity checksum and is never sufficient evidence. The second stage plans tier-validation and CP-SAT reference runs only from a validated threshold artifact. `run-shard` executes the assigned real v2 adapters and refuses to overwrite an existing shard output. `validate-results`
 detects missing, duplicate, extra, cross-phase, wrong-budget, and wrong-seed
 records against the pre-enumerated plan.
@@ -98,3 +110,6 @@ validation uses independent tier-validation seeds, exact hit-rate and
 resource-limit denominators, nearest-rank Q1/Q3 and IQR, lower medians for even
 samples, and the algorithm-agreement rule. Bounded failure never becomes a lower
 bound.
+
+
+Plan validation authoritatively reconstructs the exact ordered case × algorithm × budget × seed run list from the bound manifest, profile, and (for tier/reference plans) replayed threshold artifact. A self-consistent rehashed plan with deleted, substituted, extra, cross-case, or reordered runs is rejected.

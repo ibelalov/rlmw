@@ -190,3 +190,14 @@ Generated result JSONL files are not source artifacts and must not be committed.
 harness for the accepted v2 candidate pool. It implements distinct threshold-fit and tier/reference stages, executes real v2 solver-disabled and CP-SAT-reference adapters, validates shard evidence, performs evidence-required authoritative threshold/tier replay (rather than trusting artifact self-digests), fits thresholds, validates tiers, and offers deterministic fixture-profile smoke checks with explicit small declared budgets without committing generated manifests, JSONL,
 thresholds, tiers, logs, matrices, or final-evaluation data. See
 `RESEARCH_CALIBRATION_V2.md`.
+
+The v2 calibration threshold-fit plan enumerates the frozen four-budget ladder
+for auditability, while the 40th-percentile fit uses only completed maximum-
+budget solver-disabled records. Generator-produced exact controls are replayed
+from evaluator-only certificates and use their exact distance for both `W` and
+the certified lower bound. The candidate CLI also provides a non-generating
+packed-audit planning preflight (the memory value is a static assumption, not measured peak RSS; an external measured n=240 audit remains required before full generation):
+
+```bash
+python rlmw_research_corpus_v2.py small-circuit-preflight --n 240 --cap 6
+```

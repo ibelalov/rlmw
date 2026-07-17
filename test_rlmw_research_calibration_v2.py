@@ -46,7 +46,47 @@ class CalibrationV2OperationalTests(unittest.TestCase):
         with self.assertRaises(cal.CalibrationV2Error): cal.build_threshold_fit_plan(man)
         fix=cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
         self.assertEqual(fix['profile_id'], cal.FIXTURE_PROFILE_ID)
-        self.assertTrue(all(r['budget']==cal.FIXTURE_BUDGETS[-1] for r in fix['runs']))
+        self.assertEqual({r['budget'] for r in fix['runs']}, set(cal.FIXTURE_BUDGETS))
+        self.assertEqual(len(fix['runs']), len(records) * len(cal.SOLVER_DISABLED_ALGORITHMS) * len(cal.FIXTURE_BUDGETS) * 8)
+    def test_generator_control_certificate_end_to_end_replay(self):
+        strata = ('ctrl-hamming-m4', 'ctrl-ext-hamming-m4', 'ctrl-rm1-m5', 'ctrl-random-k8-n24')
+        records = [cal.corpus_v2.build_record(stratum, 0, 0) for stratum in strata]
+        man = {'manifest_kind': 'calibration_fixture_manifest', 'candidate_manifest_digest': 'c' * 64,
+               'configuration_digest': cal.corpus_v2.config_digest(), 'records': records}
+        fit = cal.build_threshold_fit_plan(man, profile_id=cal.FIXTURE_PROFILE_ID)
+        def bounded_record(run, plan):
+            rows, n = cal.v1.parse_h_rows(run['H_rows']); rank = cal.v1.gf2_rank_bit_rows(rows, n)
+            if run['solver_stratum'] == cal.SOLVER_ASSISTED:
+                return cal.normalize_dependency_unavailable(run, plan, rank=rank, runtime=0.0, error='integration fixture bounded')
+            outcome = cal.v1.BaselineOutcome(termination_reason='candidate_budget_exhausted', candidate_evaluations=run['budget'], objective_evaluations=run['budget'], exact_verifications=run['budget'], valid_codewords_seen=run['budget'])
+            return cal.normalize_v1_outcome(outcome, run, plan, rank=rank, runtime=0.0, error=None)
+        # Generator-shaped records traverse every planning/replay contract.  The
+        # bounded adapter avoids treating this unit test as a calibration run.
+        fit_records = [bounded_record(run, fit) for run in fit['runs']]
+        thresholds = cal.fit_thresholds(man, fit, fit_records)
+        tier = cal.build_tier_reference_plan(man, thresholds, profile_id=cal.FIXTURE_PROFILE_ID, fit_plan=fit, fit_records=fit_records)
+        tier_records = [bounded_record(run, tier) for run in tier['runs']]
+        tiers = cal.validate_tiers(man, tier, thresholds, tier_records, fit_plan=fit, fit_records=fit_records)
+        cal.validate_threshold_artifact(thresholds, manifest=man, plan=fit, records=fit_records)
+        cal.validate_tier_artifact(tiers, manifest=man, plan=tier, thresholds=thresholds, records=tier_records, fit_plan=fit, fit_records=fit_records)
+        expected = {r['case_id']: r['evaluator_only_provenance']['certificate']['exact_distance'] for r in records}
+        for row in thresholds['thresholds']:
+            self.assertEqual(row['threshold_source'], 'exact_control_replay')
+            self.assertEqual(row['W'], expected[row['case_id']])
+            self.assertEqual(row['certified_lower_bound'], expected[row['case_id']])
+        self.assertTrue(all(row['reason'] == 'exact_control' for row in tiers['tiers']))
+        bad = copy.deepcopy(man); bad['records'][0]['evaluator_only_provenance']['certificate']['exact_distance'] += 1
+        with self.assertRaises(cal.CalibrationV2Error): cal.evaluator_metadata(bad['records'][0])
+
+    def test_production_run_counts_follow_normative_four_budget_design(self):
+        # Synthetic public cases are sufficient to assert frozen planning math.
+        records = [{'case_id': f'case-{i}', 'H_rows': ['1'], 'public_h_sha256': cal.isd_v2.public_h_sha256(['1']), 'n': 1, 'family_id': 'unknown', 'validation': {}} for i in range(192)]
+        man = {'manifest_kind': 'candidate_pool_manifest', 'candidate_manifest_digest': 'd' * 64, 'configuration_digest': cal.corpus_v2.config_digest(), 'records': records}
+        # Avoid production-manifest validation here; this asserts enumeration only.
+        plan = cal.build_threshold_fit_plan(man)
+        self.assertEqual(len(plan['runs']), 192 * 4 * 4 * 8)
+        self.assertEqual(len(plan['runs']) + 192 * 4 * 4 * 8 + 192 * 2 * 4, 50688)
+
     def test_run_shard_nonempty_membership_overwrite_and_merge(self):
         with tempfile.TemporaryDirectory() as d:
             d=Path(d); man=cal.make_fixture_manifest(); mp=d/'manifest.json'; cal.write_json(mp, man)
@@ -89,7 +129,21 @@ class CalibrationV2OperationalTests(unittest.TestCase):
 
         # Make availability genuinely insufficient while retaining complete,
         # semantically valid evidence for every planned run.
-        for record in records[:17]:
+        target_case = unknown['records'][0]['case_id']; max_budget = fit['budgets'][-1]
+        target_max_records = [record for record in records if record['case_id'] == target_case and record['budget'] == max_budget]
+        self.assertEqual(len(target_max_records), 32)
+        # Give every maximum-budget target record a valid completed incumbent
+        # before turning exactly 17 of those semantic records into limits.
+        for record in target_max_records:
+            self.set_incumbent_weight(record, 2)
+            record.update({'termination_reason': 'candidate_budget_exhausted', 'completed_budget': True,
+                           'resource_limit': False, 'candidate_evaluations': max_budget,
+                           'objective_evaluations': max_budget, 'exact_verifications': max_budget,
+                           'valid_codewords_seen': max_budget})
+            self.rehash(record)
+        selected = target_max_records[:17]
+        self.assertEqual(len(selected), 17)
+        for record in selected:
             record.update({'termination_reason': 'resource_limit', 'completed_budget': False,
                            'resource_limit': True, 'candidate_evaluations': 0,
                            'objective_evaluations': 0, 'exact_verifications': 0,
@@ -99,7 +153,9 @@ class CalibrationV2OperationalTests(unittest.TestCase):
                            'threshold_hit': False})
             record['record_sha256'] = cal.digest({k:v for k,v in record.items() if k != 'record_sha256'})
         thresholds = cal.fit_thresholds(unknown, fit, records)
-        self.assertIsNone(thresholds['thresholds'][0]['W'])
+        target_threshold = next(row for row in thresholds['thresholds'] if row['case_id'] == target_case)
+        self.assertEqual(target_threshold['fit_available'], 15)
+        self.assertIsNone(target_threshold['W'])
         tier = cal.build_tier_reference_plan(unknown, thresholds, profile_id=cal.FIXTURE_PROFILE_ID,
                                              fit_plan=fit, fit_records=records)
         tier_records = [cal.execute_run(run, tier) for run in tier['runs']]
@@ -325,6 +381,15 @@ class CalibrationV2OperationalTests(unittest.TestCase):
         self.assertTrue(cp)
         self.assertTrue(all(r['solver_stratum']==cal.SOLVER_ASSISTED for r in cp))
         self.assertFalse(any(r['algorithm_id']==cal.CP_SAT for r in fit_records))
+    def test_authoritative_plan_completeness_rejects_rehashed_run_tampering(self):
+        man, fit, fit_records, thresholds, tier, tier_records, _ = self.flow()
+        for plan, threshold_artifact in ((fit, None), (tier, thresholds)):
+            for mutate in (lambda runs: runs.pop(), lambda runs: runs.reverse(), lambda runs: runs.__setitem__(0, copy.deepcopy(runs[-1]))):
+                forged = copy.deepcopy(plan); mutate(forged['runs'])
+                forged['plan_sha256'] = cal.digest({k: v for k, v in forged.items() if k != 'plan_sha256'})
+                with self.assertRaises(cal.CalibrationV2Error):
+                    cal.validate_plan_against_manifest(forged, man, thresholds=threshold_artifact)
+
     def test_strict_json_and_cli_error(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'bad.json'; p.write_text('{"a":1,"a":2}', encoding='ascii')

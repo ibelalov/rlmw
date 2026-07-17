@@ -62,6 +62,24 @@ class V2CandidateToolingTests(unittest.TestCase):
         large = v2.generate_dense("dense-n96-r48-p50", 0, 0)[0]
         self.assertEqual(v2.small_circuit_audit(large, 6, resource_limit_entries=10)["status"], "RESOURCE_LIMIT")
 
+    def test_packed_audit_differential_and_n240_preflight(self):
+        # Deterministic varied small matrices compare the production packed
+        # implementation with the retained tuple-syndrome reference.
+        for n in range(3, 10):
+            for r in range(1, min(6, n) + 1):
+                for salt in range(7):
+                    H = v2.BinaryMatrix.from_rows([[(i * 37 + j * 19 + salt * 11) >> ((i + j + salt) % 7) & 1 for j in range(n)] for i in range(r)])
+                    for cap in range(1, 7):
+                        got = v2.small_circuit_audit(H, cap)
+                        ref = v2._small_circuit_audit_reference(H, cap)
+                        self.assertEqual((got['status'], got.get('weight')), (ref['status'], ref.get('weight')))
+        preflight = v2.small_circuit_audit_preflight()
+        self.assertEqual(preflight['status'], 'PASS')
+        self.assertEqual(preflight['n'], 240)
+        self.assertLessEqual(preflight['half_subset_entries'], v2.DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES)
+        self.assertEqual(preflight['syndrome_representation'], 'packed_python_int')
+        self.assertEqual(v2.small_circuit_audit_preflight(240, 7), {'status': 'RESOURCE_LIMIT', 'cap': 7, 'reason': 'cap exceeds hard limit'})
+
     def test_manifest_validation_and_determinism(self):
         a = v2.canonical_json(self.manifest)
         b = v2.canonical_json(v2.build_manifest(v2.generate_records(smoke=True)))
