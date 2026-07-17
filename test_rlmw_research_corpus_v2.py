@@ -74,9 +74,11 @@ class V2CandidateToolingTests(unittest.TestCase):
                         ref = v2._small_circuit_audit_reference(H, cap)
                         self.assertEqual((got['status'], got.get('weight')), (ref['status'], ref.get('weight')))
         preflight = v2.small_circuit_audit_preflight()
+        self.assertEqual(preflight['status'], 'PASS')
         self.assertEqual(preflight['n'], 240)
         self.assertLessEqual(preflight['half_subset_entries'], v2.DEFAULT_AUDIT_RESOURCE_LIMIT_ENTRIES)
         self.assertEqual(preflight['syndrome_representation'], 'packed_python_int')
+        self.assertEqual(v2.small_circuit_audit_preflight(240, 7), {'status': 'RESOURCE_LIMIT', 'cap': 7, 'reason': 'cap exceeds hard limit'})
 
     def test_manifest_validation_and_determinism(self):
         a = v2.canonical_json(self.manifest)

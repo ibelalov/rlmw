@@ -179,30 +179,22 @@ def plan_budgets(profile_id: str) -> tuple[int, int, int, int]:
     require(profile_id in (PRODUCTION_PROFILE_ID, FIXTURE_PROFILE_ID), "unknown calibration profile")
     return FIXTURE_BUDGETS if profile_id == FIXTURE_PROFILE_ID else BUDGETS
 
-def build_threshold_fit_plan(manifest: Mapping[str, Any], *, profile_id: str = PRODUCTION_PROFILE_ID) -> dict[str, Any]:
-    require(profile_id == manifest_profile(manifest), "manifest/profile binding mismatch")
-    budgets = plan_budgets(profile_id)
-    common = common_plan_fields(manifest); runs = []
+def enumerated_plan_runs(manifest: Mapping[str, Any], *, schema: str, profile_id: str, thresholds: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Authoritatively reconstruct ordered public runs; never trust plan runs."""
+    budgets = plan_budgets(profile_id); runs = []
+    if schema == TIER_PLAN_SCHEMA:
+        require(thresholds is not None, "tier plan reconstruction requires thresholds")
+        tm = threshold_map(thresholds)
     for rec in manifest["records"]:
         case = case_public(rec); validate_public_case(case); rows, n = v1.parse_h_rows(case["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n)
-        for alg in SOLVER_DISABLED_ALGORITHMS:
-            for budget in budgets:
-                cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
-                for seed_index in range(8):
-                    runs.append({"run_schema": "fit-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": FIT_PHASE, "seed_role": FIT_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(FIT_ROLE, seed_index), "budget": budget})
-    plan = {"schema": FIT_PLAN_SCHEMA, **common, "profile_id": profile_id, "budgets": list(budgets), "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
-
-def threshold_map(thresholds: Mapping[str, Any]) -> dict[str, Any]: return {t["case_id"]: t for t in thresholds["thresholds"]}
-def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[str, Any], *, profile_id: str = PRODUCTION_PROFILE_ID, fit_plan: Mapping[str, Any] | None = None, fit_records: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
-    require(profile_id == manifest_profile(manifest), "manifest/profile binding mismatch")
-    require(fit_plan is not None and fit_records is not None, "tier planning requires complete threshold replay evidence")
-    budgets = plan_budgets(profile_id)
-    validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); require(thresholds["candidate_manifest_sha256"] == manifest_digest(manifest), "threshold/manifest digest mismatch"); tm = threshold_map(thresholds); common = common_plan_fields(manifest); runs = []
-    for rec in manifest["records"]:
-        case = case_public(rec); rows, n = v1.parse_h_rows(case["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n); W = tm[case["case_id"]]["W"]
-        # A missing threshold has no tier-validation objective, hence no
-        # solver-facing run.  Its complete artifact row is emitted by replay.
-        if W is not None:
+        if schema == FIT_PLAN_SCHEMA:
+            for alg in SOLVER_DISABLED_ALGORITHMS:
+                for budget in budgets:
+                    cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
+                    for seed_index in range(8): runs.append({"run_schema": "fit-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": FIT_PHASE, "seed_role": FIT_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(FIT_ROLE, seed_index), "budget": budget})
+        else:
+            W = tm[case["case_id"]]["W"]
+            if W is None: continue
             for alg in SOLVER_DISABLED_ALGORITHMS:
                 for budget in budgets:
                     cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
@@ -210,6 +202,20 @@ def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[s
             for profile in CP_SAT_PROFILES:
                 cfg = copy.deepcopy(profile); cd = config_digest(cfg)
                 for phase, role, seed_index in CP_SAT_SEED_PAIRS: runs.append({"run_schema": "reference-run-v2", **case, "solver_stratum": SOLVER_ASSISTED, "algorithm_id": CP_SAT, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": REFERENCE_PHASE, "seed_role": role, "seed_index": seed_index, "seed_hex": seed_hex(role, seed_index), "budget": 0, "W": W, "reference_source_phase": phase})
+    return runs
+
+def build_threshold_fit_plan(manifest: Mapping[str, Any], *, profile_id: str = PRODUCTION_PROFILE_ID) -> dict[str, Any]:
+    require(profile_id == manifest_profile(manifest), "manifest/profile binding mismatch")
+    common = common_plan_fields(manifest); runs = enumerated_plan_runs(manifest, schema=FIT_PLAN_SCHEMA, profile_id=profile_id)
+    plan = {"schema": FIT_PLAN_SCHEMA, **common, "profile_id": profile_id, "budgets": list(plan_budgets(profile_id)), "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
+
+def threshold_map(thresholds: Mapping[str, Any]) -> dict[str, Any]: return {t["case_id"]: t for t in thresholds["thresholds"]}
+def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[str, Any], *, profile_id: str = PRODUCTION_PROFILE_ID, fit_plan: Mapping[str, Any] | None = None, fit_records: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
+    require(profile_id == manifest_profile(manifest), "manifest/profile binding mismatch")
+    require(fit_plan is not None and fit_records is not None, "tier planning requires complete threshold replay evidence")
+    budgets = plan_budgets(profile_id)
+    validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); require(thresholds["candidate_manifest_sha256"] == manifest_digest(manifest), "threshold/manifest digest mismatch"); common = common_plan_fields(manifest)
+    runs = enumerated_plan_runs(manifest, schema=TIER_PLAN_SCHEMA, profile_id=profile_id, thresholds=thresholds)
     plan = {"schema": TIER_PLAN_SCHEMA, **common, "profile_id": profile_id, "budgets": list(budgets), "thresholds_sha256": thresholds["thresholds_sha256"], "runs": runs}; plan["plan_sha256"] = digest({k:v for k,v in plan.items() if k != "plan_sha256"}); return plan
 
 def validate_plan(plan: Mapping[str, Any], *, expected_schema: str | None = None) -> None:
@@ -233,11 +239,14 @@ def validate_plan(plan: Mapping[str, Any], *, expected_schema: str | None = None
     for run in plan["runs"]:
         validate_run(run, plan_schema=plan["schema"], profile_id=plan["profile_id"], budgets=tuple(plan["budgets"])); ident = run_identity(run); require(ident not in seen, "duplicate plan run"); seen.add(ident)
 
-def validate_plan_against_manifest(plan: Mapping[str, Any], manifest: Mapping[str, Any]) -> None:
+def validate_plan_against_manifest(plan: Mapping[str, Any], manifest: Mapping[str, Any], *, thresholds: Mapping[str, Any] | None = None) -> None:
     validate_plan(plan)
     require(plan["profile_id"] == manifest_profile(manifest) and plan["manifest_kind"] == manifest.get("manifest_kind", "candidate_pool_manifest"), "plan/manifest profile mismatch")
     require(plan["candidate_manifest_sha256"] == manifest_digest(manifest), "plan/manifest digest mismatch")
     require(plan["candidate_generator_config_sha256"] == manifest.get("configuration_digest", corpus_v2.config_digest()), "plan/manifest config mismatch")
+    if plan["schema"] == TIER_PLAN_SCHEMA: require(thresholds is not None, "tier plan requires threshold artifact for completeness replay")
+    expected_runs = enumerated_plan_runs(manifest, schema=plan["schema"], profile_id=plan["profile_id"], thresholds=thresholds)
+    require(canonical_bytes(plan["runs"]) == canonical_bytes(expected_runs), "plan runs are not the authoritative ordered enumeration")
     by_case = {rec["case_id"]: case_public(rec) for rec in manifest["records"]}
     for run in plan["runs"]:
         require(run["case_id"] in by_case, "planned case missing from manifest")
@@ -533,7 +542,7 @@ def validate_threshold_artifact(artifact: Mapping[str, Any], *, manifest: Mappin
 
 def validate_tiers(manifest: Mapping[str, Any], plan: Mapping[str, Any], thresholds: Mapping[str, Any], records: Sequence[Mapping[str, Any],], *, fit_plan: Mapping[str, Any] | None = None, fit_records: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     require(fit_plan is not None and fit_records is not None, "tier validation requires threshold replay evidence")
-    validate_plan_against_manifest(plan, manifest); validate_plan(plan, expected_schema=TIER_PLAN_SCHEMA); validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); require(plan["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier plan/threshold digest mismatch"); validate_results(plan, records)
+    validate_plan_against_manifest(plan, manifest, thresholds=thresholds); validate_plan(plan, expected_schema=TIER_PLAN_SCHEMA); validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); require(plan["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier plan/threshold digest mismatch"); validate_results(plan, records)
     tm = threshold_map(thresholds); by_case: dict[str, list[Mapping[str, Any]]] = {}
     for rec in records:
         if rec["solver_stratum"] == SOLVER_DISABLED: by_case.setdefault(rec["case_id"], []).append(rec)
@@ -582,7 +591,7 @@ def validate_tier_artifact(artifact: Mapping[str, Any], *, manifest: Mapping[str
         require(artifact["profile_id"] == manifest_profile(manifest) and artifact["candidate_manifest_sha256"] == manifest_digest(manifest), "tier/manifest binding mismatch")
         require(seen == {r["case_id"] for r in manifest["records"]}, "tier cases do not match manifest")
         validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records)
-        validate_plan_against_manifest(plan, manifest); require(plan["schema"] == TIER_PLAN_SCHEMA, "tier plan schema mismatch")
+        validate_plan_against_manifest(plan, manifest, thresholds=thresholds); require(plan["schema"] == TIER_PLAN_SCHEMA, "tier plan schema mismatch")
         require(plan["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier plan/threshold binding mismatch")
         require(artifact["tier_plan_sha256"] == plan["plan_sha256"] and artifact["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier evidence binding mismatch")
         require(artifact["tier_results_sha256"] == digest(list(records)), "tier result evidence mismatch")
@@ -650,8 +659,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.cmd == "fit-thresholds": write_json(Path(args.output), fit_thresholds(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), read_json(Path(args.plan)), read_jsonl(Path(args.results)))); return 0
     if args.cmd == "tier-reference-plan": write_json(Path(args.output), build_tier_reference_plan(load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture), read_json(Path(args.thresholds)), profile_id=FIXTURE_PROFILE_ID if args.allow_fixture else PRODUCTION_PROFILE_ID, fit_plan=read_json(Path(args.fit_plan)), fit_records=read_jsonl(Path(args.fit_results)))); return 0
     if args.cmd == "run-shard":
-        manifest = load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture); plan = read_json(Path(args.plan)); validate_plan_against_manifest(plan, manifest);
-        if plan["schema"] == TIER_PLAN_SCHEMA: require(args.thresholds is not None, "tier/reference shards require threshold artifact"); threshold_artifact = read_json(Path(args.thresholds)); require(args.fit_plan is not None and args.fit_results is not None, "tier/reference shards require complete fit replay evidence"); validate_threshold_artifact(threshold_artifact, manifest=manifest, plan=read_json(Path(args.fit_plan)), records=read_jsonl(Path(args.fit_results))); require(plan.get("thresholds_sha256") == threshold_artifact["thresholds_sha256"], "plan/threshold artifact mismatch")
+        manifest = load_candidate_manifest(Path(args.manifest), allow_fixture=args.allow_fixture); plan = read_json(Path(args.plan));
+        if plan["schema"] == FIT_PLAN_SCHEMA: validate_plan_against_manifest(plan, manifest);
+        if plan["schema"] == TIER_PLAN_SCHEMA: require(args.thresholds is not None, "tier/reference shards require threshold artifact"); threshold_artifact = read_json(Path(args.thresholds)); require(args.fit_plan is not None and args.fit_results is not None, "tier/reference shards require complete fit replay evidence"); validate_threshold_artifact(threshold_artifact, manifest=manifest, plan=read_json(Path(args.fit_plan)), records=read_jsonl(Path(args.fit_results))); require(plan.get("thresholds_sha256") == threshold_artifact["thresholds_sha256"], "plan/threshold artifact mismatch"); validate_plan_against_manifest(plan, manifest, thresholds=threshold_artifact)
         runs = assigned_runs(plan, args.shard_index, args.shard_count); require(runs, "assigned shard is empty"); write_jsonl(Path(args.output), [execute_run(run, plan) for run in runs]); return 0
     if args.cmd == "validate-results":
         plan = read_json(Path(args.plan)); records=[]

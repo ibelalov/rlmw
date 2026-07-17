@@ -110,3 +110,6 @@ validation uses independent tier-validation seeds, exact hit-rate and
 resource-limit denominators, nearest-rank Q1/Q3 and IQR, lower medians for even
 samples, and the algorithm-agreement rule. Bounded failure never becomes a lower
 bound.
+
+
+Plan validation authoritatively reconstructs the exact ordered case × algorithm × budget × seed run list from the bound manifest, profile, and (for tier/reference plans) replayed threshold artifact. A self-consistent rehashed plan with deleted, substituted, extra, cross-case, or reordered runs is rejected.

@@ -196,7 +196,7 @@ for auditability, while the 40th-percentile fit uses only completed maximum-
 budget solver-disabled records. Generator-produced exact controls are replayed
 from evaluator-only certificates and use their exact distance for both `W` and
 the certified lower bound. The candidate CLI also provides a non-generating
-packed-audit preflight:
+packed-audit planning preflight (the memory value is a static assumption, not measured peak RSS; an external measured n=240 audit remains required before full generation):
 
 ```bash
 python rlmw_research_corpus_v2.py small-circuit-preflight --n 240 --cap 6

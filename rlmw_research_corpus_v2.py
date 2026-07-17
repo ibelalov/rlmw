@@ -718,10 +718,12 @@ def small_circuit_audit(H: BinaryMatrix, cap: int, resource_limit_entries: int =
 def small_circuit_audit_preflight(n: int = 240, cap: int = HARD_SMALL_CIRCUIT_CAP) -> Dict[str, Any]:
     """Bounded planning estimate; it neither generates nor retains matrices."""
     require_uint(n, "n"); require_uint(cap, "small_circuit_cap")
+    if cap > HARD_SMALL_CIRCUIT_CAP:
+        return {"status": "RESOURCE_LIMIT", "cap": cap, "reason": "cap exceeds hard limit"}
     half = min(3, cap); entries = sum(math.comb(n, w) for w in range(half + 1))
-    return {"n": n, "cap": cap, "half_subset_entries": entries,
+    return {"status": "PASS", "n": n, "cap": cap, "half_subset_entries": entries,
             "syndrome_representation": "packed_python_int", "witness_representation": "packed_column_mask",
-            "estimated_peak_memory_bytes": entries * 96,
+            "planning_assumption_bytes_per_entry": 96, "planning_assumption_memory_bytes": entries * 96,
             "runtime_expectation": "external calibration preflight; O(sum(C(n,i), i=0..3)) exact XOR insert/lookups"}
 
 

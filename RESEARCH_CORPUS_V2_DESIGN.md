@@ -228,9 +228,11 @@ Structural exact small-circuit replay is capped at column-subset weight 6 for un
 The cap-6 meet-in-the-middle implementation stores half-subset syndromes and
 witness supports as exact packed integers, not tuple-valued syndromes. Its
 bounded `n=240` preflight reports the `sum(C(240,i), i=0..3)` half-subset count,
-runtime class, and conservative peak-memory estimate without generating a
-matrix or artifact; the accepted-profile default limit must accommodate that
-count.
+runtime class, and a clearly labelled static memory-planning assumption without
+generating a matrix or artifact; it is not a measured or conservative peak-RSS
+result. An external measured `n=240` audit recording peak RSS and wall time is
+required before full generation, and the accepted-profile default limit must
+accommodate that count.
 
 Calibration hardware is separately provisioned. Required calibration uses three inherited solver-disabled baselines, at least one stronger solver-disabled ISD family, and one solver-assisted CP-SAT reference, with budgets in Section 9. Expected pre-freeze calibration run records:
 
