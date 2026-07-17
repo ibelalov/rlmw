@@ -72,6 +72,8 @@ python rlmw_research_calibration_v2.py summary /tmp/rlmw-cal-v2/tiers.json --man
 python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw-cal-v2-smoke
 ```
 
+Threshold-fit and tier-reference plans have separate exact top-level schemas: only tier-reference plans carry a required SHA-256 `thresholds_sha256` binding. Plans reject missing and unknown fields. When fitting cannot establish an unknown-case threshold, tier planning emits no solver-facing tier runs for that case; authoritative replay still emits a full, schema-identical `calibration_incomplete` tier row with `W`, IQR, and upper bound set to `null`, rate/median maps empty, and boolean agreement/gap fields `false`.
+
 The first stage fits thresholds from solver-disabled evidence only. `tier-reference-plan`, `validate-tiers`, and `summary` perform authoritative replay: they require the complete fit plan/results and complete tier plan/results, then recompute every decision-bearing threshold and tier field. A self-recomputed artifact digest is only an integrity checksum and is never sufficient evidence. The second stage plans tier-validation and CP-SAT reference runs only from a validated threshold artifact. `run-shard` executes the assigned real v2 adapters and refuses to overwrite an existing shard output. `validate-results`
 detects missing, duplicate, extra, cross-phase, wrong-budget, and wrong-seed
 records against the pre-enumerated plan.

@@ -44,20 +44,64 @@ class CalibrationV2OperationalTests(unittest.TestCase):
             self.assertEqual(cal.main(['run-shard',str(mp),str(pp),'--shard-index','1','--shard-count','2','--output',str(out1),'--allow-fixture']),0)
             merged=cal.merge_shards(fit,[out0,out1]); self.assertEqual(len(merged), len(fit['runs']))
             with self.assertRaises(cal.CalibrationV2Error): cal.merge_shards(fit,[out0,out0])
-    def test_threshold_policies_exact_planted_and_unknown_incomplete(self):
-        man,fit,fit_records,thresholds,*_=self.flow()
-        by={r['case_id']:r for r in thresholds['thresholds']}
+    def test_threshold_policies_unknown_complete_and_incomplete_tier_replay(self):
+        man, fit, fit_records, thresholds, *_ = self.flow()
+        by = {r['case_id']: r for r in thresholds['thresholds']}
         self.assertEqual(by['calv2-fixture-even4']['threshold_source'], 'exact_control_replay')
         self.assertFalse(by['calv2-fixture-even4']['planted_threshold_artificial'])
         self.assertEqual(by['calv2-fixture-planted5']['threshold_source'], 'evaluator_planted_upper_bound')
         self.assertTrue(by['calv2-fixture-planted5']['planted_threshold_artificial'])
-        man2=copy.deepcopy(man); man2['records'][0]['validation']={}; man2['records'][0]['family_id']='unknown'
-        th=cal.fit_thresholds(man2, fit, []) if False else None
-    def test_percentiles_medians_and_hard_gap_boundary(self):
+
+        # Remove evaluator controls before planning: this is a genuine unknown
+        # case, fitted from complete production-validator result records.
+        unknown = cal.make_fixture_manifest()
+        unknown['records'][0]['validation'] = {}
+        unknown['records'][0]['family_id'] = 'unknown'
+        fit = cal.build_threshold_fit_plan(unknown, profile_id=cal.FIXTURE_PROFILE_ID)
+        records = [cal.execute_run(run, fit) for run in fit['runs']]
+        thresholds = cal.fit_thresholds(unknown, fit, records)
+        row = thresholds['thresholds'][0]
+        self.assertEqual(row['threshold_source'], 'solver_disabled_nearest_rank_40pct')
+        self.assertIsInstance(row['W'], int)
+
+        # Make availability genuinely insufficient while retaining complete,
+        # semantically valid evidence for every planned run.
+        for record in records[:17]:
+            record.update({'termination_reason': 'resource_limit', 'completed_budget': False,
+                           'resource_limit': True, 'candidate_evaluations': 0,
+                           'objective_evaluations': 0, 'exact_verifications': 0,
+                           'valid_codewords_seen': 0, 'threshold_witnesses_seen': 0,
+                           'best_candidate_bits': None, 'best_candidate_sha256': None,
+                           'best_weight': None, 'witness_verified': False,
+                           'threshold_hit': False})
+            record['record_sha256'] = cal.digest({k:v for k,v in record.items() if k != 'record_sha256'})
+        thresholds = cal.fit_thresholds(unknown, fit, records)
+        self.assertIsNone(thresholds['thresholds'][0]['W'])
+        tier = cal.build_tier_reference_plan(unknown, thresholds, profile_id=cal.FIXTURE_PROFILE_ID,
+                                             fit_plan=fit, fit_records=records)
+        tier_records = [cal.execute_run(run, tier) for run in tier['runs']]
+        tiers = cal.validate_tiers(unknown, tier, thresholds, tier_records, fit_plan=fit, fit_records=records)
+        cal.validate_tier_artifact(tiers, manifest=unknown, plan=tier, thresholds=thresholds,
+                                   records=tier_records, fit_plan=fit, fit_records=records)
+        incomplete = {row['case_id']: row for row in tiers['tiers']}[unknown['records'][0]['case_id']]
+        self.assertEqual(incomplete['reason'], 'missing_threshold')
+        self.assertEqual(set(incomplete), {'case_id', 'tier', 'decision', 'reason', 'W', 'hit_rates',
+                         'resource_limit_frequencies', 'iqr', 'algorithm_medians',
+                         'algorithm_agreement_gap2', 'best_solver_disabled_upper_bound',
+                         'certified_lower_bound', 'hard_gap_ok'})
+
+    def test_percentiles_and_hard_gap_workflow_boundary(self):
         self.assertEqual(cal.nearest_rank([10,20,30,40,50], .40),20)
-        self.assertEqual(cal.nearest_rank([1,2,3,4], .75),3)
         self.assertEqual(cal.lower_median([4,1,3,2]),2)
-        self.assertLessEqual(20-8, max(12, __import__('math').ceil(.20*40)))
+        man, fit, fit_records, thresholds, tier, tier_records, _ = self.flow()
+        # Alter authoritative evidence rather than repeating policy arithmetic:
+        # a far incumbent rejects the hard rule, while the original workflow
+        # remains accepted/replayable for its actual fixture cases.
+        self.assertTrue(any(row['hard_gap_ok'] for row in cal.validate_tiers(man, tier, thresholds, tier_records, fit_plan=fit, fit_records=fit_records)['tiers'] if row['W'] is not None))
+        target = next(r for r in tier_records if r['solver_stratum'] == cal.SOLVER_DISABLED and r['budget'] == tier['budgets'][-1])
+        bad = copy.deepcopy(target); bad['best_weight'] = 999; bad['record_sha256'] = cal.digest({k:v for k,v in bad.items() if k != 'record_sha256'})
+        with self.assertRaises(cal.CalibrationV2Error): cal.validate_tiers(man, tier, thresholds, [bad if r is target else r for r in tier_records], fit_plan=fit, fit_records=fit_records)
+
     def test_tampering_rejections(self):
         man,fit,fit_records,thresholds,tier,tier_records,_=self.flow()
         bad=copy.deepcopy(fit); bad['runs'][0]['public_h_sha256']='0'*64; bad['plan_sha256']=cal.digest({k:v for k,v in bad.items() if k!='plan_sha256'})
@@ -82,6 +126,33 @@ class CalibrationV2OperationalTests(unittest.TestCase):
         with self.assertRaises(cal.CalibrationV2Error):
             cal.validate_tier_artifact(bad_tier, manifest=man, plan=tier, thresholds=thresholds,
                                        records=tier_records, fit_plan=fit, fit_records=fit_records)
+
+    def test_rehashed_plan_bindings_and_artifact_fields_reject(self):
+        man, fit, fit_records, thresholds, tier, tier_records, tiers = self.flow()
+        for field, value in [('fit_available', 0), ('fit_denominator', 1),
+                             ('fit_contributing_algorithms', []), ('threshold_source', 'forged'),
+                             ('decision', 'forged')]:
+            forged = copy.deepcopy(thresholds); forged['thresholds'][0][field] = value
+            forged['thresholds_sha256'] = cal.digest({k:v for k,v in forged.items() if k != 'thresholds_sha256'})
+            with self.assertRaises(cal.CalibrationV2Error):
+                cal.validate_threshold_artifact(forged, manifest=man, plan=fit, records=fit_records)
+        for field, value in [('hit_rates', {}), ('resource_limit_frequencies', {}), ('iqr', 999),
+                             ('algorithm_medians', {}), ('algorithm_agreement_gap2', False),
+                             ('best_solver_disabled_upper_bound', 999), ('hard_gap_ok', False),
+                             ('tier', 'forged'), ('decision', 'forged'), ('reason', 'forged')]:
+            forged = copy.deepcopy(tiers); forged['tiers'][0][field] = value
+            forged['tiers_sha256'] = cal.digest({k:v for k,v in forged.items() if k != 'tiers_sha256'})
+            with self.assertRaises(cal.CalibrationV2Error):
+                cal.validate_tier_artifact(forged, manifest=man, plan=tier, thresholds=thresholds,
+                                           records=tier_records, fit_plan=fit, fit_records=fit_records)
+        forged_plan = copy.deepcopy(tier); forged_plan['thresholds_sha256'] = '0' * 64
+        forged_plan['plan_sha256'] = cal.digest({k:v for k,v in forged_plan.items() if k != 'plan_sha256'})
+        with self.assertRaises(cal.CalibrationV2Error):
+            cal.validate_tiers(man, forged_plan, thresholds, tier_records, fit_plan=fit, fit_records=fit_records)
+        for plan, key in ((fit, 'unexpected'), (tier, 'unexpected')):
+            forged = copy.deepcopy(plan); forged[key] = 1
+            forged['plan_sha256'] = cal.digest({k:v for k,v in forged.items() if k != 'plan_sha256'})
+            with self.assertRaises(cal.CalibrationV2Error): cal.validate_plan(forged)
 
     def test_partial_phase_validation_and_cp_sat_separation(self):
         man,fit,fit_records,thresholds,tier,tier_records,_=self.flow()

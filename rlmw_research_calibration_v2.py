@@ -182,11 +182,13 @@ def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[s
     validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); require(thresholds["candidate_manifest_sha256"] == manifest_digest(manifest), "threshold/manifest digest mismatch"); tm = threshold_map(thresholds); common = common_plan_fields(manifest); runs = []
     for rec in manifest["records"]:
         case = case_public(rec); rows, n = v1.parse_h_rows(case["H_rows"]); rank = v1.gf2_rank_bit_rows(rows, n); W = tm[case["case_id"]]["W"]
-        for alg in SOLVER_DISABLED_ALGORITHMS:
-            for budget in budgets:
-                cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
-                for seed_index in range(8): runs.append({"run_schema": "tier-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": TIER_PHASE, "seed_role": TIER_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(TIER_ROLE, seed_index), "budget": budget, "W": W})
+        # A missing threshold has no tier-validation objective, hence no
+        # solver-facing run.  Its complete artifact row is emitted by replay.
         if W is not None:
+            for alg in SOLVER_DISABLED_ALGORITHMS:
+                for budget in budgets:
+                    cfg = algorithm_config(alg, budget=budget, n=n, rank=rank); cd = config_digest(cfg)
+                    for seed_index in range(8): runs.append({"run_schema": "tier-run-v2", **case, "solver_stratum": SOLVER_DISABLED, "algorithm_id": alg, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": TIER_PHASE, "seed_role": TIER_ROLE, "seed_index": seed_index, "seed_hex": seed_hex(TIER_ROLE, seed_index), "budget": budget, "W": W})
             for profile in CP_SAT_PROFILES:
                 cfg = copy.deepcopy(profile); cd = config_digest(cfg)
                 for phase, role, seed_index in CP_SAT_SEED_PAIRS: runs.append({"run_schema": "reference-run-v2", **case, "solver_stratum": SOLVER_ASSISTED, "algorithm_id": CP_SAT, "algorithm_config": cfg, "algorithm_config_sha256": cd, "phase": REFERENCE_PHASE, "seed_role": role, "seed_index": seed_index, "seed_hex": seed_hex(role, seed_index), "budget": 0, "W": W, "reference_source_phase": phase})
@@ -195,11 +197,17 @@ def build_tier_reference_plan(manifest: Mapping[str, Any], thresholds: Mapping[s
 def validate_plan(plan: Mapping[str, Any], *, expected_schema: str | None = None) -> None:
     require(plan.get("schema") in (FIT_PLAN_SCHEMA, TIER_PLAN_SCHEMA), "unknown plan schema")
     if expected_schema: require(plan.get("schema") == expected_schema, "wrong plan phase")
+    common_keys = {"schema", "protocol_id", "manifest_kind", "candidate_manifest_sha256", "candidate_generator_config_sha256", "calibration_source_commit", "module_digests", "dependency_versions", "profile_id", "budgets", "runs", "plan_sha256"}
+    expected_keys = common_keys if plan["schema"] == FIT_PLAN_SCHEMA else common_keys | {"thresholds_sha256"}
+    require(set(plan) == expected_keys, "plan has missing or unknown fields")
     require(plan.get("protocol_id") == PROTOCOL_ID, "wrong protocol")
     for key in ("manifest_kind", "candidate_manifest_sha256", "candidate_generator_config_sha256", "calibration_source_commit", "module_digests", "dependency_versions", "profile_id", "budgets", "runs", "plan_sha256"):
         require(key in plan, f"missing plan field {key}")
     require(is_sha256(plan["candidate_manifest_sha256"]) and is_sha256(plan["candidate_generator_config_sha256"]), "bad plan digests")
-    require(isinstance(plan["calibration_source_commit"], str) and len(plan["calibration_source_commit"]) >= 40, "bad source commit")
+    require(isinstance(plan["calibration_source_commit"], str) and len(plan["calibration_source_commit"]) == 40 and all(ch in "0123456789abcdef" for ch in plan["calibration_source_commit"]), "bad source commit")
+    require(isinstance(plan["module_digests"], dict) and set(plan["module_digests"]) == {"calibration_module_sha256", "candidate_config_digest", "candidate_module_sha256", "v1_baselines_module_sha256", "isd_v2_module_sha256"} and all(is_sha256(value) for value in plan["module_digests"].values()), "bad module provenance")
+    require(isinstance(plan["dependency_versions"], dict) and set(plan["dependency_versions"]) == {"python", "platform", "ortools", "numpy", "scipy"} and all(value is None or isinstance(value, str) for value in plan["dependency_versions"].values()), "bad dependency provenance")
+    if plan["schema"] == TIER_PLAN_SCHEMA: require(is_sha256(plan["thresholds_sha256"]), "bad tier-plan threshold digest")
     require(plan["profile_id"] in (PRODUCTION_PROFILE_ID, FIXTURE_PROFILE_ID) and tuple(plan["budgets"]) == plan_budgets(plan["profile_id"]), "plan profile/budgets mismatch")
     require(plan["manifest_kind"] == ("calibration_fixture_manifest" if plan["profile_id"] == FIXTURE_PROFILE_ID else "candidate_pool_manifest"), "plan manifest-kind/profile mismatch")
     require(plan["plan_sha256"] == digest({k:v for k,v in plan.items() if k != "plan_sha256"}), "plan digest mismatch")
@@ -341,7 +349,7 @@ def candidate_fields(best_word: int | None, rows: Sequence[int], n: int) -> dict
     return {"best_candidate_bits": bits, "best_candidate_sha256": v1.candidate_sha256(bits), "best_weight": wt, "witness_verified": True}
 
 def base_record(run: Mapping[str, Any], plan: Mapping[str, Any], *, rank: int, runtime: float) -> dict[str, Any]:
-    record = {"result_schema": RESULT_SCHEMA, "protocol_id": PROTOCOL_ID, "plan_schema": plan["schema"], "profile_id": plan["profile_id"], "manifest_kind": plan["manifest_kind"], "plan_sha256": plan["plan_sha256"], "candidate_manifest_sha256": plan["candidate_manifest_sha256"], "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "calibration_source_commit": plan["calibration_source_commit"], "module_digests": plan["module_digests"], "dependency_versions": dependency_versions(), "case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"], "n": len(run["H_rows"][0]), "rank": rank, "solver_stratum": run["solver_stratum"], "algorithm_id": run["algorithm_id"], "algorithm_config": run["algorithm_config"], "algorithm_config_sha256": run["algorithm_config_sha256"], "phase": run["phase"], "seed_role": run["seed_role"], "seed_index": run["seed_index"], "seed_hex": run["seed_hex"], "budget": run["budget"], "W": run.get("W"), "runtime_s": 0.0, "reference_source_phase": run.get("reference_source_phase"), "record_sha256": ""}
+    record = {"result_schema": RESULT_SCHEMA, "protocol_id": PROTOCOL_ID, "plan_schema": plan["schema"], "profile_id": plan["profile_id"], "manifest_kind": plan["manifest_kind"], "plan_sha256": plan["plan_sha256"], "candidate_manifest_sha256": plan["candidate_manifest_sha256"], "candidate_generator_config_sha256": plan["candidate_generator_config_sha256"], "calibration_source_commit": plan["calibration_source_commit"], "module_digests": plan["module_digests"], "dependency_versions": dependency_versions(), "case_id": run["case_id"], "H_rows": run["H_rows"], "public_h_sha256": run["public_h_sha256"], "n": len(run["H_rows"][0]), "rank": rank, "solver_stratum": run["solver_stratum"], "algorithm_id": run["algorithm_id"], "algorithm_config": run["algorithm_config"], "algorithm_config_sha256": run["algorithm_config_sha256"], "phase": run["phase"], "seed_role": run["seed_role"], "seed_index": run["seed_index"], "seed_hex": run["seed_hex"], "budget": run["budget"], "W": run.get("W"), "runtime_s": runtime, "reference_source_phase": run.get("reference_source_phase"), "record_sha256": ""}
     return record
 
 def normalize_dependency_unavailable(run: Mapping[str, Any], plan: Mapping[str, Any], *, rank: int, runtime: float, error: str) -> dict[str, Any]:
@@ -379,8 +387,8 @@ def validate_result_record(record: Mapping[str, Any], *, plan: Mapping[str, Any]
     rows, n = v1.parse_h_rows(record["H_rows"]); require(record["n"] == n and record["rank"] == v1.gf2_rank_bit_rows(rows, n), "dimension/rank mismatch")
     for key in ("candidate_manifest_sha256", "candidate_generator_config_sha256", "plan_sha256", "algorithm_config_sha256"): require(is_sha256(record[key]), f"bad digest {key}")
     require(record["algorithm_config_sha256"] == config_digest(record["algorithm_config"]), "algorithm config digest mismatch")
-    for key in ("seed_index", "budget", "candidate_evaluations", "objective_evaluations", "exact_verifications", "valid_codewords_seen", "threshold_witnesses_seen", "information_set_attempts", "information_sets_accepted", "singular_information_sets", "solver_calls"): genuine_int(record[key], key, minimum=0)
-    require(isinstance(record["completed_budget"], bool) and isinstance(record["resource_limit"], bool) and isinstance(record["witness_verified"], bool) and isinstance(record["threshold_hit"], bool), "boolean fields must be literal")
+    for key in ("n", "rank", "seed_index", "budget", "candidate_evaluations", "objective_evaluations", "exact_verifications", "valid_codewords_seen", "threshold_witnesses_seen", "information_set_attempts", "information_sets_accepted", "singular_information_sets", "solver_calls"): genuine_int(record[key], key, minimum=0)
+    require(all(isinstance(record[key], bool) for key in ("completed_budget", "resource_limit", "witness_verified", "threshold_hit", "threshold_infeasibility_certified")), "boolean fields must be literal")
     if record["phase"] == FIT_PHASE: require(record["W"] is None and record["threshold_hit"] is False and record["threshold_witnesses_seen"] == 0, "fit result must not use W")
     else:
         if record["W"] is not None: genuine_int(record["W"], "W", minimum=0)
@@ -399,6 +407,7 @@ def validate_result_record(record: Mapping[str, Any], *, plan: Mapping[str, Any]
         require(record["threshold_witnesses_seen"] <= record["valid_codewords_seen"], "threshold count exceeds valid count")
         require(record["information_sets_accepted"] + record["singular_information_sets"] == record["information_set_attempts"], "information-set accounting mismatch")
         require(record["completed_budget"] == (record["candidate_evaluations"] == record["budget"] and record["termination_reason"] == "candidate_budget_exhausted"), "completed_budget semantics mismatch")
+        require(record["resource_limit"] == (not record["completed_budget"]), "solver-disabled resource-limit semantics mismatch")
     if record["completed_budget"]: require(record["resource_limit"] is False, "completed resource-limit mismatch")
     if plan is not None:
         require(record["plan_sha256"] == plan["plan_sha256"], "record bound to wrong plan")
@@ -427,7 +436,7 @@ def lower_median(vals: Sequence[int]) -> int:
 def completed_incumbent(record: Mapping[str, Any]) -> bool: return record.get("completed_budget") is True and record.get("resource_limit") is False and record.get("best_weight") is not None and record.get("witness_verified") is True
 
 def fit_thresholds(manifest: Mapping[str, Any], plan: Mapping[str, Any], records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    validate_plan(plan, expected_schema=FIT_PLAN_SCHEMA); validate_results(plan, records)
+    validate_plan_against_manifest(plan, manifest); validate_plan(plan, expected_schema=FIT_PLAN_SCHEMA); validate_results(plan, records)
     by_case: dict[str, list[Mapping[str, Any]]] = {}
     for rec in records: by_case.setdefault(rec["case_id"], []).append(rec)
     thresholds = []
@@ -475,14 +484,16 @@ def validate_threshold_artifact(artifact: Mapping[str, Any], *, manifest: Mappin
 
 def validate_tiers(manifest: Mapping[str, Any], plan: Mapping[str, Any], thresholds: Mapping[str, Any], records: Sequence[Mapping[str, Any],], *, fit_plan: Mapping[str, Any] | None = None, fit_records: Sequence[Mapping[str, Any]] | None = None) -> dict[str, Any]:
     require(fit_plan is not None and fit_records is not None, "tier validation requires threshold replay evidence")
-    validate_plan_against_manifest(plan, manifest); validate_plan(plan, expected_schema=TIER_PLAN_SCHEMA); validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); validate_results(plan, records)
+    validate_plan_against_manifest(plan, manifest); validate_plan(plan, expected_schema=TIER_PLAN_SCHEMA); validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records); require(plan["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier plan/threshold digest mismatch"); validate_results(plan, records)
     tm = threshold_map(thresholds); by_case: dict[str, list[Mapping[str, Any]]] = {}
     for rec in records:
         if rec["solver_stratum"] == SOLVER_DISABLED: by_case.setdefault(rec["case_id"], []).append(rec)
     tiers = []
     for crec in manifest["records"]:
         cid = crec["case_id"]; trow = tm[cid]; W = trow["W"]; rs = by_case.get(cid, []); n = int(trow["n"] or len(crec["H_rows"][0])); lower = int(trow["certified_lower_bound"] or 1)
-        if W is None: tiers.append({"case_id": cid, "tier": "calibration_incomplete", "decision": "incomplete", "reason": "missing_threshold"}); continue
+        if W is None:
+            # Non-applicable statistics are explicit so all tier rows replay under one schema.
+            tiers.append({"case_id": cid, "tier": "calibration_incomplete", "decision": "incomplete", "reason": "missing_threshold", "W": None, "hit_rates": {}, "resource_limit_frequencies": {}, "iqr": None, "algorithm_medians": {}, "algorithm_agreement_gap2": False, "best_solver_disabled_upper_bound": None, "certified_lower_bound": lower, "hard_gap_ok": False}); continue
         rates = {}; rlf = {}
         for budget in plan["budgets"]:
             br = [r for r in rs if r["budget"] == budget]; denom = len(SOLVER_DISABLED_ALGORITHMS)*8
@@ -523,6 +534,7 @@ def validate_tier_artifact(artifact: Mapping[str, Any], *, manifest: Mapping[str
         require(seen == {r["case_id"] for r in manifest["records"]}, "tier cases do not match manifest")
         validate_threshold_artifact(thresholds, manifest=manifest, plan=fit_plan, records=fit_records)
         validate_plan_against_manifest(plan, manifest); require(plan["schema"] == TIER_PLAN_SCHEMA, "tier plan schema mismatch")
+        require(plan["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier plan/threshold binding mismatch")
         require(artifact["tier_plan_sha256"] == plan["plan_sha256"] and artifact["thresholds_sha256"] == thresholds["thresholds_sha256"], "tier evidence binding mismatch")
         require(artifact["tier_results_sha256"] == digest(list(records)), "tier result evidence mismatch")
         authoritative = validate_tiers(manifest, plan, thresholds, records, fit_plan=fit_plan, fit_records=fit_records)
@@ -555,12 +567,19 @@ def make_fixture_manifest() -> dict[str, Any]:
     return man
 
 def smoke(output_dir: Path) -> dict[str, Any]:
+    # Fixture evidence is deliberately byte-reproducible; production records
+    # retain the measured runtime supplied by execute_run/base_record.
+    def fixture_record(run: Mapping[str, Any], plan: Mapping[str, Any]) -> dict[str, Any]:
+        record = execute_run(run, plan)
+        record["runtime_s"] = 0.0
+        record["record_sha256"] = digest({k: v for k, v in record.items() if k != "record_sha256"})
+        return record
     output_dir.mkdir(parents=True, exist_ok=True); manifest = make_fixture_manifest(); write_json(output_dir/"fixture_manifest.json", manifest)
     fit_plan = build_threshold_fit_plan(manifest, profile_id=FIXTURE_PROFILE_ID); write_json(output_dir/"threshold_fit_plan.json", fit_plan)
-    fit_runs = assigned_runs(fit_plan, 0, 1); fit_records = [execute_run(run, fit_plan) for run in fit_runs]; write_jsonl(output_dir/"threshold_fit_results.jsonl", fit_records)
+    fit_runs = assigned_runs(fit_plan, 0, 1); fit_records = [fixture_record(run, fit_plan) for run in fit_runs]; write_jsonl(output_dir/"threshold_fit_results.jsonl", fit_records)
     thresholds = fit_thresholds(manifest, fit_plan, fit_records); write_json(output_dir/"thresholds.json", thresholds)
     tier_plan = build_tier_reference_plan(manifest, thresholds, profile_id=FIXTURE_PROFILE_ID, fit_plan=fit_plan, fit_records=fit_records); write_json(output_dir/"tier_reference_plan.json", tier_plan)
-    tier_records = [execute_run(run, tier_plan) for run in tier_plan["runs"] if not (run["algorithm_id"] == CP_SAT and dependency_versions()["ortools"] is None)]
+    tier_records = [fixture_record(run, tier_plan) for run in tier_plan["runs"] if not (run["algorithm_id"] == CP_SAT and dependency_versions()["ortools"] is None)]
     write_jsonl(output_dir/"tier_reference_results.jsonl", tier_records)
     # For smoke without OR-Tools, validate the partial operational shard and skip final tier artifact.
     if len(tier_records) == len(tier_plan["runs"]): tiers = validate_tiers(manifest, tier_plan, thresholds, tier_records, fit_plan=fit_plan, fit_records=fit_records); write_json(output_dir/"tiers.json", tiers)
