@@ -86,6 +86,29 @@ jobs:
           test -z "$(git ls-files 'candidate_pool_manifest.json' '*v2*manifest*.json' --exclude-standard)"
 
 
+      - name: V2 calibration harness contracts
+        run: |
+          python -m py_compile rlmw_research_calibration_v2.py test_rlmw_research_calibration_v2.py
+          python -m unittest -v test_rlmw_research_calibration_v2.py
+          python -O -m unittest -v test_rlmw_research_calibration_v2.py
+          rm -rf /tmp/rlmw_cal_v2_a /tmp/rlmw_cal_v2_b
+          python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw_cal_v2_a
+          python rlmw_research_calibration_v2.py smoke --output-dir /tmp/rlmw_cal_v2_b
+          cmp /tmp/rlmw_cal_v2_a/threshold_fit_plan.json /tmp/rlmw_cal_v2_b/threshold_fit_plan.json
+          cmp /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl /tmp/rlmw_cal_v2_b/threshold_fit_results.jsonl
+          cmp /tmp/rlmw_cal_v2_a/thresholds.json /tmp/rlmw_cal_v2_b/thresholds.json
+          cmp /tmp/rlmw_cal_v2_a/tier_reference_plan.json /tmp/rlmw_cal_v2_b/tier_reference_plan.json
+          cmp /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl /tmp/rlmw_cal_v2_b/tier_reference_results.jsonl
+          cmp /tmp/rlmw_cal_v2_a/tiers.json /tmp/rlmw_cal_v2_b/tiers.json
+          python rlmw_research_calibration_v2.py validate-results /tmp/rlmw_cal_v2_a/threshold_fit_plan.json /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl --summary
+          python rlmw_research_calibration_v2.py validate-results /tmp/rlmw_cal_v2_a/tier_reference_plan.json /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl --summary
+          python rlmw_research_calibration_v2.py validate-tiers /tmp/rlmw_cal_v2_a/fixture_manifest.json /tmp/rlmw_cal_v2_a/tier_reference_plan.json /tmp/rlmw_cal_v2_a/thresholds.json /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl --fit-plan /tmp/rlmw_cal_v2_a/threshold_fit_plan.json --fit-results /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl --allow-fixture --output /tmp/rlmw_cal_v2_a/tiers-replayed.json
+          cmp /tmp/rlmw_cal_v2_a/tiers.json /tmp/rlmw_cal_v2_a/tiers-replayed.json
+          python rlmw_research_calibration_v2.py summary /tmp/rlmw_cal_v2_a/tiers.json --manifest /tmp/rlmw_cal_v2_a/fixture_manifest.json --tier-plan /tmp/rlmw_cal_v2_a/tier_reference_plan.json --thresholds /tmp/rlmw_cal_v2_a/thresholds.json --tier-results /tmp/rlmw_cal_v2_a/tier_reference_results.jsonl --fit-plan /tmp/rlmw_cal_v2_a/threshold_fit_plan.json --fit-results /tmp/rlmw_cal_v2_a/threshold_fit_results.jsonl --allow-fixture
+          git diff --check
+          test -z "$(git ls-files 'rlmw_calibration_v2_results.jsonl' '*calibration*v2*.jsonl' '*thresholds*.json' '*tiers*.json' --exclude-standard)"
+
+
       - name: V2 Stern-Dumer ISD contracts
         run: |
           python -m py_compile rlmw_research_isd_v2.py test_rlmw_research_isd_v2.py
